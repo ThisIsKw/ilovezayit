@@ -1,0 +1,1362 @@
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/SaveManager.lua"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "Pra Isabella ",
+    SubTitle = "by KW",
+    TabWidth = 160,
+    Size = UDim2.fromOffset(580, 460),
+    Acrylic = true,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local Tabs = {
+    Sheriff = Window:AddTab({ Title = "Sheriff", Icon = "swords" }),
+    Murder = Window:AddTab({ Title = "Murder", Icon = "skull" }),
+    Player = Window:AddTab({ Title = "Player", Icon = "user" }),
+    Teleport = Window:AddTab({ Title = "Teleport", Icon = "map-pin" }),
+    Visual = Window:AddTab({ Title = "Visual", Icon = "eye" }),
+    Troll = Window:AddTab({ Title = "Troll", Icon = "flame" }),
+    AutoFarm = Window:AddTab({ Title = "Auto Farm", Icon = "gamepad-2" }),
+    Settings = Window:AddTab({ Title = "Settings", Icon = "settings" })
+}
+
+local Options = Fluent.Options
+
+-- Sheriff/Silent Aim Variables
+local sheriffConfig = {
+    showButton = false,
+    draggableButton = false,
+    holsterWeapon = false,
+    -- Advanced Prediction Config
+    PingPrediction = true,
+    PingSensitivity = 1.18,
+    JumpPrediction = true,
+    HorizontalMultiplier = 0.79,
+    VerticalMultiplier = 0.79,
+    HorizontalDivisorMin = 10.00,
+    HorizontalDivisorMax = 12.00,
+    MaxPredictionDistance = 350.00,
+    DistanceFactor = 12.00,
+    VerticalDistanceScale = 10.50,
+    LeadTime = 0.12,
+    XMultiplier = 0.00,
+    ZMultiplier = -0.01
+}
+
+-- ESP Variables
+local espConfig = {
+    enabled = false,
+    gunEnabled = false,
+    coinEnabled = false,
+    murdererColor = Color3.new(1, 0, 0),
+    sheriffColor = Color3.new(0, 0, 1),
+    innocentColor = Color3.new(1, 1, 1)
+}
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local screenButton = nil
+
+-- Player Script Variables
+local player = game.Players.LocalPlayer
+local rs = game:GetService("RunService")
+local MY_SPEED = 16 
+local MY_JUMP = 50 
+local loopConnection = nil
+local scriptActive = false
+
+-- Fling Variables
+local flingActive = false
+local currentFlingConnection = nil
+
+-- ESP Functions
+local function getRole(plr)
+    local character = plr.Character
+    local backpack = plr:FindFirstChild("Backpack")
+
+    if not character or not backpack then return "Innocent" end
+
+    if character:FindFirstChild("Knife") or backpack:FindFirstChild("Knife") then
+        return "Murderer"
+    elseif character:FindFirstChild("Gun") or backpack:FindFirstChild("Gun") then
+        return "Sheriff"
+    else
+        return "Innocent"
+    end
+end
+
+local function loadCharacter(chr)
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "NovaESP_Highlight"
+    highlight.FillTransparency = 1
+    highlight.OutlineColor = espConfig.innocentColor
+    highlight.Parent = chr
+
+    local playerRole = getRole(Players:GetPlayerFromCharacter(chr))
+    if playerRole == "Murderer" then
+        highlight.OutlineColor = espConfig.murdererColor
+    elseif playerRole == "Sheriff" then
+        highlight.OutlineColor = espConfig.sheriffColor
+    end
+
+    chr.ChildAdded:Connect(function(child)
+        if child.Name == "Gun" then
+            chr["NovaESP_Highlight"].OutlineColor = espConfig.sheriffColor
+        elseif child.Name == "Knife" then
+            chr["NovaESP_Highlight"].OutlineColor = espConfig.murdererColor
+        end
+    end)
+end
+
+local function loadPlayer(plr)
+    if plr.Character then
+        loadCharacter(plr.Character)
+    end
+
+    plr.CharacterAdded:Connect(function(chr)
+        loadCharacter(chr)
+    end)
+end
+
+local function updateESPColors()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("NovaESP_Highlight") then
+            local role = getRole(plr)
+            if role == "Murderer" then
+                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.murdererColor
+            elseif role == "Sheriff" then
+                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.sheriffColor
+            else
+                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.innocentColor
+            end
+        end
+    end
+end
+
+local function enablePlayerESP()
+    Players.PlayerAdded:Connect(function(plr)
+        loadPlayer(plr)
+    end)
+
+    if ReplicatedStorage:FindFirstChild("Remotes") then
+        local startEvent = ReplicatedStorage.Remotes.Gameplay.RoundStart
+        startEvent.OnClientEvent:Connect(function(_, data)
+            for username, info in data do
+                local player = Players:FindFirstChild(username)
+                if player and player.Character and player.Character:FindFirstChild("NovaESP_Highlight") then
+                    if info.Role == "Murderer" then
+                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.murdererColor
+                    elseif info.Role == "Sheriff" then
+                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.sheriffColor
+                    else
+                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.innocentColor
+                    end
+                end
+            end
+        end)
+    end
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        loadPlayer(plr)
+    end
+end
+
+local function disablePlayerESP()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("NovaESP_Highlight") then
+            plr.Character.NovaESP_Highlight:Destroy()
+        end
+    end
+end
+
+-- Gun ESP
+local gunESPConnection = nil
+local function enableGunESP()
+    gunESPConnection = task.spawn(function()
+        while espConfig.gunEnabled do
+            task.wait(1)
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v.Name == "GunDrop" then
+                    if not v:FindFirstChild("GunESP_Highlight") then
+                        local highlight = Instance.new("Highlight")
+                        highlight.Name = "GunESP_Highlight"
+                        highlight.Parent = v
+                        highlight.FillColor = Color3.fromRGB(255, 255, 0)
+                        highlight.OutlineColor = Color3.new(1, 1, 1)
+                        highlight.FillTransparency = 0.5
+                        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    end
+                    
+                    if not v:FindFirstChild("GunESP_Name") then
+                        local billboard = Instance.new("BillboardGui")
+                        billboard.Name = "GunESP_Name"
+                        billboard.Parent = v
+                        billboard.AlwaysOnTop = true
+                        billboard.Size = UDim2.new(0, 100, 0, 50)
+                        billboard.StudsOffset = Vector3.new(0, 2, 0)
+
+                        local label = Instance.new("TextLabel")
+                        label.Parent = billboard
+                        label.BackgroundTransparency = 1
+                        label.Size = UDim2.new(1, 0, 1, 0)
+                        label.Text = "GUN"
+                        label.TextColor3 = Color3.fromRGB(255, 255, 0)
+                        label.TextStrokeTransparency = 0
+                        label.TextSize = 14
+                        label.Font = Enum.Font.SourceSansBold
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function disableGunESP()
+    espConfig.gunEnabled = false
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:FindFirstChild("GunESP_Highlight") then
+            v.GunESP_Highlight:Destroy()
+        end
+        if v:FindFirstChild("GunESP_Name") then
+            v.GunESP_Name:Destroy()
+        end
+    end
+end
+
+-- Coin ESP
+local function aplicarCoinESP(objeto)
+    if objeto:FindFirstChild("Coin_XRAY") then return end
+
+    local adorn = Instance.new("BoxHandleAdornment")
+    adorn.Name = "Coin_XRAY"
+    adorn.AlwaysOnTop = true 
+    adorn.Adornee = objeto
+    adorn.ZIndex = 5
+    adorn.Size = objeto.Size 
+    adorn.Color3 = Color3.fromRGB(255, 255, 0) 
+    adorn.Transparency = 0.6 
+    adorn.Parent = objeto
+
+    objeto.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            adorn:Destroy()
+        end
+    end)
+end
+
+local coinESPConnection = nil
+local function enableCoinESP()
+    local function varrer()
+        for _, v in pairs(Workspace:GetDescendants()) do
+            if v.Name == "Coin_Server" and v:IsA("BasePart") then
+                aplicarCoinESP(v)
+            end
+        end
+    end
+
+    varrer()
+
+    coinESPConnection = Workspace.DescendantAdded:Connect(function(new)
+        if espConfig.coinEnabled and new.Name == "Coin_Server" then
+            aplicarCoinESP(new)
+        end
+    end)
+end
+
+local function disableCoinESP()
+    if coinESPConnection then
+        coinESPConnection:Disconnect()
+        coinESPConnection = nil
+    end
+    
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:FindFirstChild("Coin_XRAY") then
+            v.Coin_XRAY:Destroy()
+        end
+    end
+end
+
+-- Sheriff Functions
+local function GetPing()
+    return LocalPlayer:GetNetworkPing() * 1000
+end
+
+local function CalculatePrediction(target, myPos)
+    local targetPos = target.Position
+    local targetVel = target.Velocity
+    local distance = (targetPos - myPos).Magnitude
+    
+    local leadTime = sheriffConfig.LeadTime
+    
+    if sheriffConfig.PingPrediction then
+        leadTime = leadTime + (GetPing() / 1000) * sheriffConfig.PingSensitivity
+    end
+    
+    if distance <= sheriffConfig.MaxPredictionDistance then
+        leadTime = leadTime + (distance / 100) * (sheriffConfig.DistanceFactor / 100)
+    end
+    
+    local pred = targetVel * leadTime
+    local predX = pred.X * sheriffConfig.HorizontalMultiplier
+    local predY = pred.Y * sheriffConfig.VerticalMultiplier
+    local predZ = pred.Z * sheriffConfig.HorizontalMultiplier
+    
+    local divisor = (sheriffConfig.HorizontalDivisorMin + sheriffConfig.HorizontalDivisorMax) / 20
+    predX = predX / divisor
+    predZ = predZ / divisor
+    
+    if distance > 50 then
+        predY = predY * (1 + (distance / 100) * (sheriffConfig.VerticalDistanceScale / 100))
+    end
+    
+    if sheriffConfig.JumpPrediction then
+        local hum = target.Parent:FindFirstChild("Humanoid")
+        if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
+            predY = predY + (targetVel.Y * 0.3)
+        end
+    end
+    
+    predX = predX + (sheriffConfig.XMultiplier * 10)
+    predZ = predZ + (sheriffConfig.ZMultiplier * 10)
+    
+    return targetPos + Vector3.new(predX, predY, predZ)
+end
+
+local function EquipWeapon()
+    local char = LocalPlayer.Character
+    if not char then return false end
+    
+    local gun = LocalPlayer.Backpack:FindFirstChild("Gun")
+    if gun then
+        local humanoid = char:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:EquipTool(gun)
+            task.wait(0.05)
+            return true
+        end
+    end
+    return false
+end
+
+local function HolsterWeapon()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local humanoid = char:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid:UnequipTools()
+    end
+end
+
+local function FindMurder()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and (player.Character:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Knife")) then
+                return hrp
+            end
+        end
+    end
+    return nil
+end
+
+local function ExecuteSilentAim()
+    local char = LocalPlayer.Character
+    local gun = char and char:FindFirstChild("Gun")
+    
+    if not gun then
+        if not EquipWeapon() then return end
+        task.wait(0.05)
+        gun = char:FindFirstChild("Gun")
+    end
+    
+    local target = FindMurder()
+    local event = gun and gun:FindFirstChild("Shoot")
+    
+    if not (target and event) then return end
+    
+    local predictionPos = CalculatePrediction(target, char.Head.Position)
+    event:FireServer(CFrame.new(char.Head.Position, predictionPos), CFrame.new(predictionPos))
+    
+    if sheriffConfig.holsterWeapon then
+        task.wait(0.05)
+        HolsterWeapon()
+    end
+end
+
+-- Gun Grabber Function
+local function getDroppedGun()
+    local drop = game.Workspace:FindFirstChild("GunDrop")
+    if drop and drop:IsA("BasePart") then
+        return drop
+    end
+    for _, v in pairs(game.Workspace:GetChildren()) do
+        if v.Name == "GunDrop" or (v:IsA("Model") and v:FindFirstChild("GunDrop")) then
+            return v:FindFirstChild("GunDrop") or v
+        end
+    end
+    return nil
+end
+
+local function GetGun()
+    local gun = getDroppedGun()
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+    if hrp and gun then
+        local oldPos = hrp.CFrame
+        
+        hrp.CFrame = gun.CFrame
+        
+        task.wait(0.2) 
+        
+        hrp.CFrame = oldPos
+        
+        Fluent:Notify({
+            Title = "Get Gun",
+            Content = "Gun collected successfully!",
+            Duration = 3
+        })
+    else
+        Fluent:Notify({
+            Title = "Get Gun",
+            Content = "Gun drop not found on map!",
+            Duration = 3
+        })
+    end
+end
+
+local function ExecuteKillAll()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local knife = char:FindFirstChild("Knife") or LocalPlayer.Backpack:FindFirstChild("Knife")
+    
+    if not knife then 
+        warn("Knife not found!") 
+        return 
+    end
+    
+    if knife.Parent ~= char then
+        knife.Parent = char
+    end
+
+    local originalPos = root.CFrame
+
+    for i = 1, 3 do 
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local tRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                local tHum = player.Character:FindFirstChild("Humanoid")
+
+                if tHum and tHum.Health > 0 and tRoot then
+                    root.CFrame = tRoot.CFrame * CFrame.new(0, 0, 1)
+                    
+                    knife:Activate()
+                    
+                    local attackEvent = knife:FindFirstChild("Stab") or knife:FindFirstChild("Slash")
+                    if attackEvent then 
+                        attackEvent:FireServer() 
+                    end
+                    
+                    task.wait()
+                end
+            end
+        end
+    end
+
+    root.CFrame = originalPos
+end
+
+local function CreateScreenButton()
+    if screenButton then return end
+    
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "SilentAimButton"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    local btn = Instance.new("TextButton")
+    btn.Name = "ShootButton"
+    btn.Size = UDim2.new(0, 80, 0, 80)
+    btn.Position = UDim2.new(0.85, 0, 0.5, 0)
+    btn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    btn.Text = "🎯"
+    btn.TextSize = 35
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = sg
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = btn
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 0, 0)
+    stroke.Thickness = 3
+    stroke.Parent = btn
+    
+    btn.MouseButton1Click:Connect(ExecuteSilentAim)
+    
+    local dragging, dragInput, mousePos, framePos = false, nil, nil, nil
+    
+    btn.InputBegan:Connect(function(input)
+        if sheriffConfig.draggableButton and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = true
+            mousePos = input.Position
+            framePos = btn.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    btn.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            local delta = input.Position - mousePos
+            btn.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    sg.Parent = game:GetService("CoreGui")
+    screenButton = sg
+end
+
+local function RemoveScreenButton()
+    if screenButton then
+        screenButton:Destroy()
+        screenButton = nil
+    end
+end
+
+-- Player Functions
+local function maintainStats()
+    local char = player.Character
+    local humanoid = char and char:FindFirstChild("Humanoid")
+    
+    if humanoid then
+        if humanoid.WalkSpeed ~= MY_SPEED then
+            humanoid.WalkSpeed = MY_SPEED
+        end
+        
+        humanoid.UseJumpPower = true
+        if humanoid.JumpPower ~= MY_JUMP then
+            humanoid.JumpPower = MY_JUMP
+        end
+    end
+end
+
+local function activateLoop()
+    if loopConnection then loopConnection:Disconnect() end
+    loopConnection = rs.Heartbeat:Connect(maintainStats)
+end
+
+local function deactivateLoop()
+    if loopConnection then 
+        loopConnection:Disconnect() 
+        loopConnection = nil
+    end
+end
+
+player.CharacterAdded:Connect(function()
+    if scriptActive then
+        activateLoop()
+    end
+end)
+
+-- Fling Functions
+local function getMurderer()
+    for _, p in pairs(game.Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if p.Character:FindFirstChild("Knife") or p.Backpack:FindFirstChild("Knife") then
+                return p.Character
+            end
+        end
+    end
+    return nil
+end
+
+local function getSheriff()
+    for _, p in pairs(game.Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if p.Character:FindFirstChild("Gun") or p.Backpack:FindFirstChild("Gun") then
+                return p.Character
+            end
+        end
+    end
+    return nil
+end
+
+local function getPlayerByName(playerName)
+    local targetPlayer = game.Players:FindFirstChild(playerName)
+    if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return targetPlayer.Character
+    end
+    return nil
+end
+
+local function stopFling()
+    flingActive = false
+    if currentFlingConnection then
+        currentFlingConnection = nil
+    end
+end
+
+local function iniciarFling(targetGetter, targetName)
+    if flingActive then
+        Fluent:Notify({
+            Title = "Fling",
+            Content = "Fling already active! Stop it first.",
+            Duration = 3
+        })
+        return
+    end
+
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    
+    if not hrp or not hum then 
+        Fluent:Notify({
+            Title = "Fling",
+            Content = "Character not found!",
+            Duration = 3
+        })
+        return 
+    end
+    
+    local targetChar = targetGetter()
+    if not targetChar then
+        Fluent:Notify({
+            Title = "Fling",
+            Content = targetName .. " not found!",
+            Duration = 3
+        })
+        return
+    end
+    
+    flingActive = true
+    local lastSafePos = hrp.CFrame
+    
+    local bPos = Instance.new("BodyPosition", hrp)
+    bPos.P = 4000000 
+    bPos.D = 1000 
+    bPos.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    
+    local bAng = Instance.new("BodyAngularVelocity", hrp)
+    bAng.AngularVelocity = Vector3.new(0, 2000000, 0) 
+    bAng.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+
+    local angle = 0
+    
+    Fluent:Notify({
+        Title = "Fling",
+        Content = "Fling started on " .. targetName .. "!",
+        Duration = 3
+    })
+    
+    currentFlingConnection = task.spawn(function()
+        while flingActive do
+            local target_char = targetGetter()
+            
+            if target_char and target_char:FindFirstChild("HumanoidRootPart") then
+                hum:ChangeState(Enum.HumanoidStateType.Physics)
+
+                if target_char.HumanoidRootPart.Position.Y < -2 then
+                    flingActive = false
+                    break
+                end
+
+                for _, v in pairs(char:GetChildren()) do
+                    if v:IsA("BasePart") then v.CanCollide = false end
+                end
+                
+                angle = angle + 0.6 
+                local target_hrp = target_char.HumanoidRootPart
+                local offset = Vector3.new(math.cos(angle) * 4, 1.5, math.sin(angle) * 3)
+                bPos.Position = target_hrp.Position + offset
+            else
+                flingActive = false 
+            end
+            rs.Heartbeat:Wait()
+        end
+        
+        bPos:Destroy()
+        bAng:Destroy()
+        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+        
+        hrp.Velocity = Vector3.new(0,0,0) 
+        hrp.RotVelocity = Vector3.new(0,0,0)
+        hrp.Anchored = true 
+        task.wait(0.1)
+        hrp.Anchored = false
+        hrp.CFrame = lastSafePos 
+        
+        for _, v in pairs(char:GetChildren()) do
+            if v:IsA("BasePart") then v.CanCollide = true end
+        end
+        
+        flingActive = false
+        
+        Fluent:Notify({
+            Title = "Fling",
+            Content = "Fling stopped!",
+            Duration = 3
+        })
+    end)
+end
+
+do
+    -- Initial welcome notification
+    Fluent:Notify({
+        Title = "Sun Hub",
+        Content = "Welcome to Sun Hub!",
+        SubContent = "Script loaded successfully",
+        Duration = 5
+    })
+    
+    -- Sheriff Tab
+    Tabs.Sheriff:AddParagraph({
+        Title = "Sheriff Tools",
+        Content = "Tools for Sheriff players including Silent Aim and Gun Grabber."
+    })
+    
+    Tabs.Sheriff:AddButton({
+        Title = "Get Gun",
+        Description = "Teleport to and collect the dropped gun",
+        Callback = GetGun
+    })
+    
+    Tabs.Sheriff:AddKeybind("GetGunKeybind", {
+        Title = "Get Gun Hotkey",
+        Mode = "Toggle",
+        Default = "G",
+        Callback = GetGun
+    })
+    
+    Tabs.Sheriff:AddParagraph({
+        Title = "Silent Aim",
+        Content = "Advanced prediction system to shoot the Murderer with precision. The script automatically equips the weapon."
+    })
+    
+    Tabs.Sheriff:AddToggle("ToggleButton", {
+        Title = "Show Screen Button",
+        Default = false,
+        Callback = function(v)
+            sheriffConfig.showButton = v
+            if v then 
+                CreateScreenButton()
+            else 
+                RemoveScreenButton()
+            end
+        end
+    })
+    
+    Tabs.Sheriff:AddToggle("ToggleDrag", {
+        Title = "Allow Dragging Button",
+        Default = false,
+        Callback = function(v)
+            sheriffConfig.draggableButton = v
+        end
+    })
+    
+    Tabs.Sheriff:AddToggle("ToggleHolster", {
+        Title = "Unequip Weapon After Shot",
+        Default = false,
+        Callback = function(v)
+            sheriffConfig.holsterWeapon = v
+        end
+    })
+    
+    Tabs.Sheriff:AddKeybind("SilentKeybind", {
+        Title = "Silent Aim Hotkey",
+        Mode = "Toggle",
+        Default = "Q",
+        Callback = ExecuteSilentAim
+    })
+    
+    Tabs.Sheriff:AddParagraph({
+        Title = "Advanced Prediction",
+        Content = "Fine-tune prediction settings for maximum accuracy."
+    })
+    
+    Tabs.Sheriff:AddToggle("PingPrediction", {
+        Title = "Ping Prediction",
+        Default = true,
+        Callback = function(v)
+            sheriffConfig.PingPrediction = v
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("PingSensitivity", {
+        Title = "Ping Sensitivity",
+        Description = "Adjust ping compensation",
+        Default = 1.18,
+        Min = 0.5,
+        Max = 2.0,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.PingSensitivity = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddToggle("JumpPrediction", {
+        Title = "Jump Prediction",
+        Default = true,
+        Callback = function(v)
+            sheriffConfig.JumpPrediction = v
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("HorizontalMultiplier", {
+        Title = "Horizontal Multiplier",
+        Description = "Adjust horizontal prediction strength",
+        Default = 0.79,
+        Min = 0.1,
+        Max = 2.0,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.HorizontalMultiplier = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("VerticalMultiplier", {
+        Title = "Vertical Multiplier",
+        Description = "Adjust vertical prediction strength",
+        Default = 0.79,
+        Min = 0.1,
+        Max = 2.0,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.VerticalMultiplier = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("LeadTime", {
+        Title = "Lead Time",
+        Description = "Base prediction time",
+        Default = 0.12,
+        Min = 0.05,
+        Max = 0.30,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.LeadTime = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("DistanceFactor", {
+        Title = "Distance Factor",
+        Description = "Distance-based prediction adjustment",
+        Default = 12.00,
+        Min = 1,
+        Max = 30,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.DistanceFactor = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("MaxPredictionDistance", {
+        Title = "Max Prediction Distance",
+        Description = "Maximum distance for prediction",
+        Default = 350,
+        Min = 100,
+        Max = 500,
+        Rounding = 0,
+        Callback = function(Value)
+            sheriffConfig.MaxPredictionDistance = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("VerticalDistanceScale", {
+        Title = "Vertical Distance Scale",
+        Description = "Vertical adjustment for distance",
+        Default = 10.50,
+        Min = 1,
+        Max = 20,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.VerticalDistanceScale = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("XMultiplier", {
+        Title = "X Multiplier",
+        Description = "Fine-tune X axis",
+        Default = 0.00,
+        Min = -1.0,
+        Max = 1.0,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.XMultiplier = Value
+        end
+    })
+    
+    Tabs.Sheriff:AddSlider("ZMultiplier", {
+        Title = "Z Multiplier",
+        Description = "Fine-tune Z axis",
+        Default = -0.01,
+        Min = -1.0,
+        Max = 1.0,
+        Rounding = 2,
+        Callback = function(Value)
+            sheriffConfig.ZMultiplier = Value
+        end
+    })
+    
+    -- Murder Tab
+    Tabs.Murder:AddParagraph({
+        Title = "Murder Tools",
+        Content = "Special functions for Murder players."
+    })
+    
+    Tabs.Murder:AddButton({
+        Title = "Kill All",
+        Description = "Eliminate all players (Murder only)",
+        Callback = ExecuteKillAll
+    })
+    
+    Tabs.Murder:AddKeybind("KillAllKeybind", {
+        Title = "Kill All Hotkey",
+        Mode = "Toggle",
+        Default = "K",
+        Callback = ExecuteKillAll
+    })
+    
+    -- Player Tab
+    Tabs.Player:AddParagraph({
+        Title = "Movement Settings",
+        Content = "Customize your character's movement speed and jump power."
+    })
+    
+    local WalkSpeedSlider = Tabs.Player:AddSlider("WalkSpeed", {
+        Title = "Walk Speed",
+        Description = "Adjust your walking speed",
+        Default = 16,
+        Min = 16,
+        Max = 200,
+        Rounding = 0,
+        Callback = function(Value)
+            MY_SPEED = Value
+        end
+    })
+    
+    local JumpPowerSlider = Tabs.Player:AddSlider("JumpPower", {
+        Title = "Jump Power",
+        Description = "Adjust your jump power",
+        Default = 50,
+        Min = 50,
+        Max = 300,
+        Rounding = 0,
+        Callback = function(Value)
+            MY_JUMP = Value
+        end
+    })
+    
+    local ToggleMovement = Tabs.Player:AddToggle("ToggleMovement", {
+        Title = "Enable Movement Modifier",
+        Default = false
+    })
+    
+    ToggleMovement:OnChanged(function()
+        scriptActive = Options.ToggleMovement.Value
+        if scriptActive then
+            activateLoop()
+        else
+            deactivateLoop()
+        end
+    end)
+    
+    -- Teleport Tab
+    Tabs.Teleport:AddParagraph({
+        Title = "Teleport Options",
+        Content = "Quick teleport to different locations and players in MM2."
+    })
+    
+    Tabs.Teleport:AddButton({
+        Title = "Teleport to Lobby",
+        Description = "Teleport back to the lobby/spawn area",
+        Callback = function()
+            local TARGET_POS = Vector3.new(14.27564525604248, 504.818115234375, -45.334800720214844)
+            local character = LocalPlayer.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            
+            if root then
+                root.Velocity = Vector3.new(0, 0, 0)
+                root.CFrame = CFrame.new(TARGET_POS + Vector3.new(0, 3, 0))
+            else
+                Fluent:Notify({
+                    Title = "Teleport",
+                    Content = "Character not found!",
+                    Duration = 3
+                })
+            end
+        end
+    })
+    
+    Tabs.Teleport:AddButton({
+        Title = "Teleport to Murder",
+        Description = "Teleport to the murderer",
+        Callback = function()
+            local target = nil
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    if p.Character:FindFirstChild("Knife") or p.Backpack:FindFirstChild("Knife") then
+                        target = p.Character:FindFirstChild("HumanoidRootPart")
+                        break
+                    end
+                end
+            end
+
+            local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot and target then
+                myRoot.CFrame = target.CFrame * CFrame.new(0, 0, 3)
+            else
+                Fluent:Notify({
+                    Title = "Teleport",
+                    Content = "Murder not found!",
+                    Duration = 3
+                })
+            end
+        end
+    })
+    
+    Tabs.Teleport:AddButton({
+        Title = "Teleport to Sheriff",
+        Description = "Teleport to the sheriff",
+        Callback = function()
+            local target = nil
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    if p.Character:FindFirstChild("Gun") or p.Backpack:FindFirstChild("Gun") then
+                        target = p.Character:FindFirstChild("HumanoidRootPart")
+                        break
+                    end
+                end
+            end
+
+            local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot and target then
+                myRoot.CFrame = target.CFrame * CFrame.new(0, 0, 3)
+            else
+                Fluent:Notify({
+                    Title = "Teleport",
+                    Content = "Sheriff not found!",
+                    Duration = 3
+                })
+            end
+        end
+    })
+    
+    local playersList = {}
+    local function RefreshPlayers()
+        playersList = {}
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                table.insert(playersList, player.Name)
+            end
+        end
+        return playersList
+    end
+    
+    RefreshPlayers()
+    
+    local PlayerDropdown = Tabs.Teleport:AddDropdown("PlayerDropdown", {
+        Title = "Select Player",
+        Values = playersList,
+        Multi = false,
+        Default = 1,
+    })
+    
+    Tabs.Teleport:AddButton({
+        Title = "Refresh Players",
+        Description = "Update the player list",
+        Callback = function()
+            local newList = RefreshPlayers()
+            PlayerDropdown:SetValues(newList)
+        end
+    })
+    
+    Tabs.Teleport:AddButton({
+        Title = "Teleport to Selected Player",
+        Description = "Teleport to the selected player",
+        Callback = function()
+            local selectedPlayer = Options.PlayerDropdown.Value
+            if selectedPlayer then
+                local targetPlayer = Players:FindFirstChild(selectedPlayer)
+                
+                if targetPlayer and targetPlayer.Character then
+                    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    
+                    if myRoot and targetRoot then
+                        myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 3)
+                    end
+                end
+            else
+                Fluent:Notify({
+                    Title = "Teleport",
+                    Content = "Please select a player first!",
+                    Duration = 3
+                })
+            end
+        end
+    })
+    
+    -- Visual Tab
+    Tabs.Visual:AddParagraph({
+        Title = "ESP Settings",
+        Content = "Enable and customize ESP (Extra Sensory Perception) for players, guns, and coins."
+    })
+    
+    local TogglePlayerESP = Tabs.Visual:AddToggle("TogglePlayerESP", {
+        Title = "Player ESP",
+        Description = "Show player roles with colored outlines",
+        Default = false
+    })
+    
+    TogglePlayerESP:OnChanged(function()
+        espConfig.enabled = Options.TogglePlayerESP.Value
+        if espConfig.enabled then
+            enablePlayerESP()
+        else
+            disablePlayerESP()
+        end
+    end)
+    
+    Tabs.Visual:AddParagraph({
+        Title = "ESP Colors",
+        Content = "Customize the outline colors for each player role."
+    })
+    
+    Tabs.Visual:AddColorpicker("MurdererColor", {
+        Title = "Murderer Color",
+        Default = Color3.new(1, 0, 0),
+        Callback = function(Value)
+            espConfig.murdererColor = Value
+            updateESPColors()
+        end
+    })
+    
+    Tabs.Visual:AddColorpicker("SheriffColor", {
+        Title = "Sheriff Color",
+        Default = Color3.new(0, 0, 1),
+        Callback = function(Value)
+            espConfig.sheriffColor = Value
+            updateESPColors()
+        end
+    })
+    
+    Tabs.Visual:AddColorpicker("InnocentColor", {
+        Title = "Innocent Color",
+        Default = Color3.new(1, 1, 1),
+        Callback = function(Value)
+            espConfig.innocentColor = Value
+            updateESPColors()
+        end
+    })
+    
+    Tabs.Visual:AddParagraph({
+        Title = "Item ESP",
+        Content = "Show dropped guns and coins on the map."
+    })
+    
+    local ToggleGunESP = Tabs.Visual:AddToggle("ToggleGunESP", {
+        Title = "Gun ESP",
+        Description = "Highlight dropped guns",
+        Default = false
+    })
+    
+    ToggleGunESP:OnChanged(function()
+        espConfig.gunEnabled = Options.ToggleGunESP.Value
+        if espConfig.gunEnabled then
+            enableGunESP()
+        else
+            disableGunESP()
+        end
+    end)
+    
+    local ToggleCoinESP = Tabs.Visual:AddToggle("ToggleCoinESP", {
+        Title = "Coin ESP",
+        Description = "Highlight coins on the map",
+        Default = false
+    })
+    
+    ToggleCoinESP:OnChanged(function()
+        espConfig.coinEnabled = Options.ToggleCoinESP.Value
+        if espConfig.coinEnabled then
+            enableCoinESP()
+        else
+            disableCoinESP()
+        end
+    end)
+    
+    -- Troll Tab
+    Tabs.Troll:AddParagraph({
+        Title = "Fling Tools",
+        Content = "Use physics to fling players around. Stop fling before starting a new one!"
+    })
+    
+    Tabs.Troll:AddButton({
+        Title = "Fling Murder",
+        Description = "Start flinging the murderer",
+        Callback = function()
+            iniciarFling(getMurderer, "Murderer")
+        end
+    })
+    
+    Tabs.Troll:AddButton({
+        Title = "Fling Sheriff",
+        Description = "Start flinging the sheriff",
+        Callback = function()
+            iniciarFling(getSheriff, "Sheriff")
+        end
+    })
+    
+    local flingPlayersList = {}
+    local function RefreshFlingPlayers()
+        flingPlayersList = {}
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                table.insert(flingPlayersList, p.Name)
+            end
+        end
+        return flingPlayersList
+    end
+    
+    RefreshFlingPlayers()
+    
+    local FlingPlayerDropdown = Tabs.Troll:AddDropdown("FlingPlayerDropdown", {
+        Title = "Select Player to Fling",
+        Values = flingPlayersList,
+        Multi = false,
+        Default = 1,
+    })
+    
+    Tabs.Troll:AddButton({
+        Title = "Refresh Player List",
+        Description = "Update the fling player list",
+        Callback = function()
+            local newList = RefreshFlingPlayers()
+            FlingPlayerDropdown:SetValues(newList)
+            Fluent:Notify({
+                Title = "Fling",
+                Content = "Player list refreshed!",
+                Duration = 2
+            })
+        end
+    })
+    
+    Tabs.Troll:AddButton({
+        Title = "Fling Selected Player",
+        Description = "Start flinging the selected player",
+        Callback = function()
+            local selectedPlayer = Options.FlingPlayerDropdown.Value
+            if selectedPlayer then
+                iniciarFling(function() return getPlayerByName(selectedPlayer) end, selectedPlayer)
+            else
+                Fluent:Notify({
+                    Title = "Fling",
+                    Content = "Please select a player first!",
+                    Duration = 3
+                })
+            end
+        end
+    })
+    
+    Tabs.Troll:AddButton({
+        Title = "Stop Fling",
+        Description = "Stop the current fling activity",
+        Callback = function()
+            if flingActive then
+                stopFling()
+                Fluent:Notify({
+                    Title = "Fling",
+                    Content = "Stopping fling...",
+                    Duration = 2
+                })
+            else
+                Fluent:Notify({
+                    Title = "Fling",
+                    Content = "No active fling to stop!",
+                    Duration = 2
+                })
+            end
+        end
+    })
+    
+    Tabs.Troll:AddKeybind("StopFlingKeybind", {
+        Title = "Stop Fling Hotkey",
+        Mode = "Toggle",
+        Default = "X",
+        Callback = stopFling
+    })
+    
+    -- Auto Farm Tab
+    Tabs.AutoFarm:AddParagraph({
+        Title = "Auto Farm Settings",
+        Content = "Anti-AFK system to keep you active in the game."
+    })
+    
+    local antiAFKActive = false
+    local antiAFKConnection = nil
+    
+    local ToggleAntiAFK = Tabs.AutoFarm:AddToggle("ToggleAntiAFK", {
+        Title = "Anti-AFK",
+        Default = false
+    })
+    
+    ToggleAntiAFK:OnChanged(function()
+        antiAFKActive = Options.ToggleAntiAFK.Value
+        
+        if antiAFKActive then
+            local VU = game:GetService("VirtualUser")
+            
+            antiAFKConnection = LocalPlayer.Idled:Connect(function()
+                VU:CaptureController()
+                VU:ClickButton2(Vector2.new())
+            end)
+        else
+            if antiAFKConnection then
+                antiAFKConnection:Disconnect()
+                antiAFKConnection = nil
+            end
+        end
+    end)
+end
+
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+InterfaceManager:SetFolder("FluentScriptHub")
+SaveManager:SetFolder("FluentScriptHub/specific-game")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+
+Window:SelectTab(1)
+
+Fluent:Notify({
+    Title = "Isabella e linda ",
+    Content = "S2",
+    Duration = 8
+})
+
+SaveManager:LoadAutoloadConfig()
