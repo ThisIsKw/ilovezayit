@@ -13,7 +13,7 @@ local Window = Fluent:CreateWindow({
 })
 
 local Tabs = {
-    Sheriff = Window:AddTab({ Title = "Sheriff", Icon = "bow-arrow" }),
+    Sheriff = Window:AddTab({ Title = "Sheriff", Icon = "swords" }),
     Murder = Window:AddTab({ Title = "Murder", Icon = "skull" }),
     Player = Window:AddTab({ Title = "Player", Icon = "user" }),
     Teleport = Window:AddTab({ Title = "Teleport", Icon = "map-pin" }),
