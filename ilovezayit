@@ -25,6 +25,18 @@ local Tabs = {
 
 local Options = Fluent.Options
 
+-- CONFIGURAÇÃO INDIVIDUAL DE HOTKEYS
+local hotkeyConfig = {
+    GetGunKeybind = { enabled = true, key = "G" },
+    SilentKeybind = { enabled = true, key = "Q" },
+    KillAllKeybind = { enabled = true, key = "K" },
+    KillSelectedKeybind = { enabled = true, key = "L" },
+    AutoKillSheriffKeybind = { enabled = true, key = "J" },
+    GodModeKeybind = { enabled = true, key = "H" },
+    NoClipKeybind = { enabled = true, key = "N" },
+    StopFlingKeybind = { enabled = true, key = "X" }
+}
+
 local sheriffConfig = {
     showButton = false,
     draggableButton = false,
@@ -44,13 +56,14 @@ local sheriffConfig = {
     ZMultiplier = -0.01
 }
 
+-- NOVO CONFIG DE CORES ESP
 local espConfig = {
     enabled = false,
+    innocentColor = Color3.fromHex("#00ff00"),    -- Verde
+    sheriffColor = Color3.fromHex("#0026ff"),     -- Azul
+    murdererColor = Color3.fromHex("#ff0000"),    -- Vermelho
     gunEnabled = false,
-    coinEnabled = false,
-    murdererColor = Color3.new(1, 0, 0),
-    sheriffColor = Color3.new(0, 0, 1),
-    innocentColor = Color3.new(1, 1, 1)
+    coinEnabled = false
 }
 
 -- Configurações do Hitbox
@@ -60,6 +73,21 @@ local hitboxConfig = {
     visible = true,
     transparency = 0.8,
     color = Color3.fromRGB(255, 0, 80)
+}
+
+-- Configurações Anti-Fling
+local antiFlingConfig = {
+    enabled = false
+}
+
+-- Configurações God Mode
+local godModeConfig = {
+    enabled = false
+}
+
+-- Configurações Faca Quebra Parede
+local ghostKnifeConfig = {
+    enabled = false
 }
 
 local Players = game:GetService("Players")
@@ -86,9 +114,196 @@ local autoKillSheriffConnection = nil
 local noclipActive = false
 local noclipConnection = nil
 
+-- Sistema de Anti-Fling
+local antiFlingActive = false
+local antiFlingConnection = nil
+
+-- Sistema de God Mode
+local godModeActive = false
+local godModeConnection = nil
+
 -- Sistema de Hitbox
 local ESP_Folder = nil
 local hitboxRunning = false
+
+-- Variáveis para o novo ESP
+local espRunning = false
+local espConnections = {}
+
+-- Variáveis para Faca Quebra Parede
+local ghostActive = false
+local ghostConnections = {}
+
+-- FUNÇÃO PARA VERIFICAR SE UMA HOTKEY ESPECÍFICA ESTÁ ATIVA
+local function isHotkeyEnabled(hotkeyName)
+    return hotkeyConfig[hotkeyName] and hotkeyConfig[hotkeyName].enabled
+end
+
+-- WRAPPER PARA HOTKEYS INDIVIDUAIS
+local function createHotkeyWrapper(hotkeyName, callback)
+    return function()
+        if isHotkeyEnabled(hotkeyName) then
+            callback()
+        end
+    end
+end
+
+-- FUNÇÃO PARA ATUALIZAR O TEXTO DA HOTKEY COM STATUS
+local function updateHotkeyStatusText()
+    local statusText = "Hotkey Status:\n"
+    for name, config in pairs(hotkeyConfig) do
+        local status = config.enabled and "✅" or "❌"
+        local hotkeyName = name:gsub("Keybind", "")
+        statusText = statusText .. string.format("%s %s: %s\n", status, hotkeyName, config.key)
+    end
+    return statusText
+end
+
+-- FUNÇÃO FACADURA PAREDE
+local function startGhostKnife()
+    ghostActive = true
+    
+    local function BloquearRaycast(obj)
+        if obj.Name == "ThrowingKnife" or obj.Name == "StuckKnife" or obj.Name == "KnifeDisplay" then
+            task.spawn(function()
+                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildOfClass("BasePart")
+                
+                while obj.Parent and ghostActive do
+                    if part then
+                        part.CanCollide = false
+                        part.CanQuery = false
+                        
+                        part.CFrame = part.CFrame * CFrame.new(0, 0, -0.5)
+                        
+                        if obj.Name == "StuckKnife" then
+                            obj.Name = "ThrowingKnife"
+                        end
+                    end
+                    task.wait()
+                end
+            end)
+        end
+    end
+
+    -- Conectar evento para novas facas
+    local childAddedConnection = workspace.ChildAdded:Connect(BloquearRaycast)
+    table.insert(ghostConnections, childAddedConnection)
+    
+    -- Loop para limpar facas existentes
+    local cleanupConnection = task.spawn(function()
+        while ghostActive do
+            for _, v in pairs(workspace:GetChildren()) do
+                if v.Name == "ThrowingKnife" or v.Name == "StuckKnife" then
+                    for _, p in pairs(v:GetDescendants()) do
+                        if p:IsA("BasePart") then
+                            p.CanCollide = false
+                            p.CanQuery = false
+                        end
+                    end
+                end
+            end
+            task.wait(0.2)
+        end
+    end)
+    table.insert(ghostConnections, cleanupConnection)
+end
+
+local function stopGhostKnife()
+    ghostActive = false
+    
+    -- Desconectar todas as conexões
+    for _, conn in pairs(ghostConnections) do
+        if type(conn) == "userdata" and conn.Connected then
+            conn:Disconnect()
+        end
+    end
+    ghostConnections = {}
+    
+    -- Restaurar facas existentes
+    for _, v in pairs(workspace:GetChildren()) do
+        if v.Name == "ThrowingKnife" or v.Name == "StuckKnife" then
+            for _, p in pairs(v:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    p.CanCollide = true
+                    p.CanQuery = true
+                end
+            end
+        end
+    end
+end
+
+-- FUNÇÃO ANTI-FLING
+local function startAntiFling()
+    if antiFlingConnection then
+        antiFlingConnection:Disconnect()
+        antiFlingConnection = nil
+    end
+    
+    antiFlingActive = true
+    antiFlingConnection = rs.Stepped:Connect(function()
+        if player.Character then
+            for _, otherPlayer in pairs(Players:GetPlayers()) do
+                if otherPlayer ~= player and otherPlayer.Character then
+                    for _, part in pairs(otherPlayer.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopAntiFling()
+    antiFlingActive = false
+    if antiFlingConnection then
+        antiFlingConnection:Disconnect()
+        antiFlingConnection = nil
+    end
+end
+
+-- FUNÇÃO GOD MODE
+local function startGodMode()
+    if godModeConnection then
+        godModeConnection:Disconnect()
+        godModeConnection = nil
+    end
+    
+    godModeActive = true
+    godModeConnection = task.spawn(function()
+        while godModeActive do
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            
+            if hum then
+                -- Mantém a vida sempre em 100
+                if hum.Health < 100 then
+                    hum.Health = 100
+                end
+                
+                -- Desativa estados de morte e queda
+                hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                
+                -- Se estiver caído ou morto, levanta
+                if hum:GetState() == Enum.HumanoidStateType.FallingDown or hum:GetState() == Enum.HumanoidStateType.Dead then
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end
+            
+            task.wait() 
+        end
+    end)
+end
+
+local function stopGodMode()
+    godModeActive = false
+    if godModeConnection then
+        godModeConnection = nil
+    end
+end
 
 local function setupHitboxSystem()
     if not ESP_Folder then
@@ -179,6 +394,206 @@ local function stopHitbox()
     end
 end
 
+-- NOVO SISTEMA ESP
+local function CreateESP(targetPlayer)
+    if targetPlayer == LocalPlayer then return end
+    
+    local function ApplyESP(character)
+        if not character then return end
+        
+        -- Esperar o corpo carregar
+        local root = character:WaitForChild("HumanoidRootPart", 10)
+        if not root then return end
+        
+        -- 1. Highlight (contorno)
+        local highlight = character:FindFirstChild("SunHighlight") or Instance.new("Highlight")
+        highlight.Name = "SunHighlight"
+        highlight.Parent = character
+        highlight.Adornee = character
+        highlight.FillTransparency = 1
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        
+        -- 2. Tag com nome
+        local tag = root:FindFirstChild("SunTag") or Instance.new("BillboardGui")
+        tag.Name = "SunTag"
+        tag.Size = UDim2.new(0, 200, 0, 50)
+        tag.AlwaysOnTop = true
+        tag.ExtentsOffset = Vector3.new(0, -3.5, 0)
+        tag.Parent = root
+        
+        local label = tag:FindFirstChild("Label") or Instance.new("TextLabel")
+        label.Name = "Label"
+        label.Parent = tag
+        label.BackgroundTransparency = 1
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.Text = targetPlayer.Name
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 14
+        label.TextStrokeTransparency = 0
+        
+        -- Loop de atualização de cores
+        local updateConnection
+        updateConnection = rs.RenderStepped:Connect(function()
+            if not character or not character.Parent then
+                if updateConnection then
+                    updateConnection:Disconnect()
+                end
+                return
+            end
+            
+            local color = espConfig.innocentColor
+            
+            -- Checar inventário
+            local backpack = targetPlayer:FindFirstChild("Backpack")
+            local hasKnife = (backpack and backpack:FindFirstChild("Knife")) or character:FindFirstChild("Knife")
+            local hasGun = (backpack and backpack:FindFirstChild("Gun")) or character:FindFirstChild("Gun")
+            
+            if hasKnife then
+                color = espConfig.murdererColor
+            elseif hasGun then
+                color = espConfig.sheriffColor
+            end
+            
+            -- Aplicar cores
+            highlight.OutlineColor = color
+            label.TextColor3 = color
+            label.Text = targetPlayer.Name
+        end)
+        
+        -- Salvar conexão para limpeza
+        table.insert(espConnections, {
+            player = targetPlayer,
+            connection = updateConnection,
+            highlight = highlight,
+            tag = tag
+        })
+    end
+    
+    -- Aplicar ESP ao personagem atual
+    if targetPlayer.Character then
+        ApplyESP(targetPlayer.Character)
+    end
+    
+    -- Conectar evento de personagem adicionado
+    local charConnection = targetPlayer.CharacterAdded:Connect(ApplyESP)
+    table.insert(espConnections, {
+        player = targetPlayer,
+        connection = charConnection,
+        charConnection = true
+    })
+end
+
+local function enablePlayerESP()
+    if espRunning then return end
+    espRunning = true
+    
+    -- Limpar conexões antigas
+    for _, conn in pairs(espConnections) do
+        if conn.connection and conn.connection.Connected then
+            conn.connection:Disconnect()
+        end
+        if conn.highlight then
+            conn.highlight:Destroy()
+        end
+        if conn.tag then
+            conn.tag:Destroy()
+        end
+    end
+    espConnections = {}
+    
+    -- Criar ESP para todos os jogadores
+    for _, plr in pairs(Players:GetPlayers()) do
+        CreateESP(plr)
+    end
+    
+    -- Conectar novo jogador
+    local playerAddedConnection = Players.PlayerAdded:Connect(CreateESP)
+    table.insert(espConnections, {connection = playerAddedConnection})
+    
+    -- Conectar jogador removido
+    local playerRemovingConnection = Players.PlayerRemoving:Connect(function(plr)
+        -- Limpar ESP do jogador removido
+        for i = #espConnections, 1, -1 do
+            local conn = espConnections[i]
+            if conn.player == plr then
+                if conn.connection and conn.connection.Connected then
+                    conn.connection:Disconnect()
+                end
+                if conn.highlight then
+                    conn.highlight:Destroy()
+                end
+                if conn.tag then
+                    conn.tag:Destroy()
+                end
+                table.remove(espConnections, i)
+            end
+        end
+    end)
+    table.insert(espConnections, {connection = playerRemovingConnection})
+end
+
+local function disablePlayerESP()
+    espRunning = false
+    
+    -- Desconectar todas as conexões
+    for _, conn in pairs(espConnections) do
+        if conn.connection and conn.connection.Connected then
+            conn.connection:Disconnect()
+        end
+        if conn.highlight then
+            conn.highlight:Destroy()
+        end
+        if conn.tag then
+            conn.tag:Destroy()
+        end
+    end
+    espConnections = {}
+    
+    -- Limpar ESP manualmente de todos os jogadores
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character then
+            local highlight = plr.Character:FindFirstChild("SunHighlight")
+            if highlight then
+                highlight:Destroy()
+            end
+        end
+    end
+end
+
+local function updateESPColors()
+    if not espRunning then return end
+    
+    -- Atualizar cores para todos os jogadores com ESP ativo
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local highlight = plr.Character:FindFirstChild("SunHighlight")
+            local tag = plr.Character:FindFirstChild("HumanoidRootPart") and 
+                       plr.Character.HumanoidRootPart:FindFirstChild("SunTag")
+            
+            if highlight and tag then
+                local label = tag:FindFirstChild("Label")
+                if label then
+                    local color = espConfig.innocentColor
+                    
+                    local backpack = plr:FindFirstChild("Backpack")
+                    local hasKnife = (backpack and backpack:FindFirstChild("Knife")) or plr.Character:FindFirstChild("Knife")
+                    local hasGun = (backpack and backpack:FindFirstChild("Gun")) or plr.Character:FindFirstChild("Gun")
+                    
+                    if hasKnife then
+                        color = espConfig.murdererColor
+                    elseif hasGun then
+                        color = espConfig.sheriffColor
+                    end
+                    
+                    highlight.OutlineColor = color
+                    label.TextColor3 = color
+                end
+            end
+        end
+    end
+end
+
 -- Função NoClip
 local function startNoClip()
     if noclipConnection then
@@ -227,185 +642,6 @@ local function getRole(plr)
         return "Sheriff"
     else
         return "Innocent"
-    end
-end
-
-local function loadCharacter(chr)
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "NovaESP_Highlight"
-    highlight.FillTransparency = 1
-    highlight.OutlineColor = espConfig.innocentColor
-    highlight.Parent = chr
-
-    local playerRole = getRole(Players:GetPlayerFromCharacter(chr))
-    if playerRole == "Murderer" then
-        highlight.OutlineColor = espConfig.murdererColor
-    elseif playerRole == "Sheriff" then
-        highlight.OutlineColor = espConfig.sheriffColor
-    end
-
-    chr.ChildAdded:Connect(function(child)
-        if child.Name == "Gun" then
-            chr["NovaESP_Highlight"].OutlineColor = espConfig.sheriffColor
-        elseif child.Name == "Knife" then
-            chr["NovaESP_Highlight"].OutlineColor = espConfig.murdererColor
-        end
-    end)
-end
-
-local function loadPlayer(plr)
-    if plr.Character then
-        loadCharacter(plr.Character)
-    end
-    plr.CharacterAdded:Connect(function(chr)
-        loadCharacter(chr)
-    end)
-end
-
-local function updateESPColors()
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr.Character and plr.Character:FindFirstChild("NovaESP_Highlight") then
-            local role = getRole(plr)
-            if role == "Murderer" then
-                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.murdererColor
-            elseif role == "Sheriff" then
-                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.sheriffColor
-            else
-                plr.Character.NovaESP_Highlight.OutlineColor = espConfig.innocentColor
-            end
-        end
-    end
-end
-
-local function enablePlayerESP()
-    Players.PlayerAdded:Connect(function(plr)
-        loadPlayer(plr)
-    end)
-    if ReplicatedStorage:FindFirstChild("Remotes") then
-        local startEvent = ReplicatedStorage.Remotes.Gameplay.RoundStart
-        startEvent.OnClientEvent:Connect(function(_, data)
-            for username, info in data do
-                local player = Players:FindFirstChild(username)
-                if player and player.Character and player.Character:FindFirstChild("NovaESP_Highlight") then
-                    if info.Role == "Murderer" then
-                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.murdererColor
-                    elseif info.Role == "Sheriff" then
-                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.sheriffColor
-                    else
-                        player.Character.NovaESP_Highlight.OutlineColor = espConfig.innocentColor
-                    end
-                end
-            end
-        end)
-    end
-    for _, plr in pairs(Players:GetPlayers()) do
-        loadPlayer(plr)
-    end
-end
-
-local function disablePlayerESP()
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr.Character and plr.Character:FindFirstChild("NovaESP_Highlight") then
-            plr.Character.NovaESP_Highlight:Destroy()
-        end
-    end
-end
-
-local gunESPConnection = nil
-local function enableGunESP()
-    gunESPConnection = task.spawn(function()
-        while espConfig.gunEnabled do
-            task.wait(1)
-            for _, v in pairs(workspace:GetDescendants()) do
-                if v.Name == "GunDrop" then
-                    if not v:FindFirstChild("GunESP_Highlight") then
-                        local highlight = Instance.new("Highlight")
-                        highlight.Name = "GunESP_Highlight"
-                        highlight.Parent = v
-                        highlight.FillColor = Color3.fromRGB(255, 255, 0)
-                        highlight.OutlineColor = Color3.new(1, 1, 1)
-                        highlight.FillTransparency = 0.5
-                        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                    end
-                    if not v:FindFirstChild("GunESP_Name") then
-                        local billboard = Instance.new("BillboardGui")
-                        billboard.Name = "GunESP_Name"
-                        billboard.Parent = v
-                        billboard.AlwaysOnTop = true
-                        billboard.Size = UDim2.new(0, 100, 0, 50)
-                        billboard.StudsOffset = Vector3.new(0, 2, 0)
-                        local label = Instance.new("TextLabel")
-                        label.Parent = billboard
-                        label.BackgroundTransparency = 1
-                        label.Size = UDim2.new(1, 0, 1, 0)
-                        label.Text = "GUN"
-                        label.TextColor3 = Color3.fromRGB(255, 255, 0)
-                        label.TextStrokeTransparency = 0
-                        label.TextSize = 14
-                        label.Font = Enum.Font.SourceSansBold
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function disableGunESP()
-    espConfig.gunEnabled = false
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:FindFirstChild("GunESP_Highlight") then
-            v.GunESP_Highlight:Destroy()
-        end
-        if v:FindFirstChild("GunESP_Name") then
-            v.GunESP_Name:Destroy()
-        end
-    end
-end
-
-local function aplicarCoinESP(objeto)
-    if objeto:FindFirstChild("Coin_XRAY") then return end
-    local adorn = Instance.new("BoxHandleAdornment")
-    adorn.Name = "Coin_XRAY"
-    adorn.AlwaysOnTop = true 
-    adorn.Adornee = objeto
-    adorn.ZIndex = 5
-    adorn.Size = objeto.Size 
-    adorn.Color3 = Color3.fromRGB(255, 255, 0) 
-    adorn.Transparency = 0.6 
-    adorn.Parent = objeto
-    objeto.AncestryChanged:Connect(function(_, parent)
-        if not parent then
-            adorn:Destroy()
-        end
-    end)
-end
-
-local coinESPConnection = nil
-local function enableCoinESP()
-    local function varrer()
-        for _, v in pairs(Workspace:GetDescendants()) do
-            if v.Name == "Coin_Server" and v:IsA("BasePart") then
-                aplicarCoinESP(v)
-            end
-        end
-    end
-    varrer()
-    coinESPConnection = Workspace.DescendantAdded:Connect(function(new)
-        if espConfig.coinEnabled and new.Name == "Coin_Server" then
-            aplicarCoinESP(new)
-        end
-    end)
-end
-
-local function disableCoinESP()
-    if coinESPConnection then
-        coinESPConnection:Disconnect()
-        coinESPConnection = nil
-    end
-    for _, v in pairs(Workspace:GetDescendants()) do
-        if v:FindFirstChild("Coin_XRAY") then
-            v.Coin_XRAY:Destroy()
-        end
     end
 end
 
@@ -808,6 +1044,106 @@ local function iniciarFling(targetGetter, targetName)
     end)
 end
 
+-- SISTEMA ESP DE ARMA
+local gunESPConnection = nil
+local function enableGunESP()
+    gunESPConnection = task.spawn(function()
+        while espConfig.gunEnabled do
+            task.wait(1)
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v.Name == "GunDrop" then
+                    if not v:FindFirstChild("GunESP_Highlight") then
+                        local highlight = Instance.new("Highlight")
+                        highlight.Name = "GunESP_Highlight"
+                        highlight.Parent = v
+                        highlight.FillColor = Color3.fromRGB(255, 255, 0)
+                        highlight.OutlineColor = Color3.new(1, 1, 1)
+                        highlight.FillTransparency = 0.5
+                        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    end
+                    if not v:FindFirstChild("GunESP_Name") then
+                        local billboard = Instance.new("BillboardGui")
+                        billboard.Name = "GunESP_Name"
+                        billboard.Parent = v
+                        billboard.AlwaysOnTop = true
+                        billboard.Size = UDim2.new(0, 100, 0, 50)
+                        billboard.StudsOffset = Vector3.new(0, 2, 0)
+                        local label = Instance.new("TextLabel")
+                        label.Parent = billboard
+                        label.BackgroundTransparency = 1
+                        label.Size = UDim2.new(1, 0, 1, 0)
+                        label.Text = "GUN"
+                        label.TextColor3 = Color3.fromRGB(255, 255, 0)
+                        label.TextStrokeTransparency = 0
+                        label.TextSize = 14
+                        label.Font = Enum.Font.SourceSansBold
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function disableGunESP()
+    espConfig.gunEnabled = false
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:FindFirstChild("GunESP_Highlight") then
+            v.GunESP_Highlight:Destroy()
+        end
+        if v:FindFirstChild("GunESP_Name") then
+            v.GunESP_Name:Destroy()
+        end
+    end
+end
+
+-- SISTEMA ESP DE MOEDAS
+local function aplicarCoinESP(objeto)
+    if objeto:FindFirstChild("Coin_XRAY") then return end
+    local adorn = Instance.new("BoxHandleAdornment")
+    adorn.Name = "Coin_XRAY"
+    adorn.AlwaysOnTop = true 
+    adorn.Adornee = objeto
+    adorn.ZIndex = 5
+    adorn.Size = objeto.Size 
+    adorn.Color3 = Color3.fromRGB(255, 255, 0) 
+    adorn.Transparency = 0.6 
+    adorn.Parent = objeto
+    objeto.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            adorn:Destroy()
+        end
+    end)
+end
+
+local coinESPConnection = nil
+local function enableCoinESP()
+    local function varrer()
+        for _, v in pairs(Workspace:GetDescendants()) do
+            if v.Name == "Coin_Server" and v:IsA("BasePart") then
+                aplicarCoinESP(v)
+            end
+        end
+    end
+    varrer()
+    coinESPConnection = Workspace.DescendantAdded:Connect(function(new)
+        if espConfig.coinEnabled and new.Name == "Coin_Server" then
+            aplicarCoinESP(new)
+        end
+    end)
+end
+
+local function disableCoinESP()
+    if coinESPConnection then
+        coinESPConnection:Disconnect()
+        coinESPConnection = nil
+    end
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:FindFirstChild("Coin_XRAY") then
+            v.Coin_XRAY:Destroy()
+        end
+    end
+end
+
 do
     Tabs.Sheriff:AddParagraph({
         Title = "Sheriff Tools",
@@ -818,12 +1154,15 @@ do
         Description = "Teleport to and collect the dropped gun",
         Callback = GetGun
     })
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Sheriff:AddKeybind("GetGunKeybind", {
         Title = "Get Gun Hotkey",
         Mode = "Toggle",
         Default = "G",
-        Callback = GetGun
+        Callback = createHotkeyWrapper("GetGunKeybind", GetGun)
     })
+    
     Tabs.Sheriff:AddParagraph({
         Title = "Silent Aim",
         Content = "Advanced prediction system to shoot the Murderer with precision. The script automatically equips the weapon."
@@ -854,12 +1193,15 @@ do
             sheriffConfig.holsterWeapon = v
         end
     })
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Sheriff:AddKeybind("SilentKeybind", {
         Title = "Silent Aim Hotkey",
         Mode = "Toggle",
         Default = "Q",
-        Callback = ExecuteSilentAim
+        Callback = createHotkeyWrapper("SilentKeybind", ExecuteSilentAim)
     })
+    
     Tabs.Sheriff:AddParagraph({
         Title = "Advanced Prediction",
         Content = "Fine-tune prediction settings for maximum accuracy."
@@ -1045,18 +1387,57 @@ do
             hitboxConfig.color = Value
         end
     })
-    -- FIM DA SEÇÃO HITBOX
+    
+    -- SEÇÃO GOD MODE
+    Tabs.Murder:AddParagraph({
+        Title = "God Mode",
+        Content = "Tank Mode - Aguenta pelo menos um tiro do Sheriff. Mantém sua vida em 100 e previne quedas."
+    })
+    
+    local ToggleGodMode = Tabs.Murder:AddToggle("ToggleGodMode", {
+        Title = "Enable God Mode",
+        Description = "Ativa o modo Tank - sobrevive a um tiro",
+        Default = false
+    })
+    
+    ToggleGodMode:OnChanged(function()
+        godModeConfig.enabled = Options.ToggleGodMode.Value
+        if godModeConfig.enabled then
+            startGodMode()
+        else
+            stopGodMode()
+        end
+    end)
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
+    Tabs.Murder:AddKeybind("GodModeKeybind", {
+        Title = "God Mode Hotkey",
+        Mode = "Toggle",
+        Default = "H",
+        Callback = createHotkeyWrapper("GodModeKeybind", function()
+            if godModeActive then
+                stopGodMode()
+                Options.ToggleGodMode:SetValue(false)
+            else
+                startGodMode()
+                Options.ToggleGodMode:SetValue(true)
+            end
+        end)
+    })
+    -- FIM DA SEÇÃO GOD MODE
     
     Tabs.Murder:AddButton({
         Title = "Kill All",
         Description = "Eliminate all players (Murder only)",
         Callback = ExecuteKillAll
     })
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Murder:AddKeybind("KillAllKeybind", {
         Title = "Kill All Hotkey",
         Mode = "Toggle",
         Default = "K",
-        Callback = ExecuteKillAll
+        Callback = createHotkeyWrapper("KillAllKeybind", ExecuteKillAll)
     })
     
     -- KILL INDIVIDUAL
@@ -1119,11 +1500,12 @@ do
         Callback = KillSelectedPlayer
     })
     
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Murder:AddKeybind("KillSelectedKeybind", {
         Title = "Kill Selected Hotkey",
         Mode = "Toggle",
         Default = "L",
-        Callback = KillSelectedPlayer
+        Callback = createHotkeyWrapper("KillSelectedKeybind", KillSelectedPlayer)
     })
     -- FIM DO KILL INDIVIDUAL
     
@@ -1143,11 +1525,13 @@ do
             StopAutoKillSheriff()
         end
     end)
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Murder:AddKeybind("AutoKillSheriffKeybind", {
         Title = "Toggle Auto Kill Hotkey",
         Mode = "Toggle",
         Default = "J",
-        Callback = function()
+        Callback = createHotkeyWrapper("AutoKillSheriffKeybind", function()
             if autoKillSheriffActive then
                 StopAutoKillSheriff()
                 Options.ToggleAutoKillSheriff:SetValue(false)
@@ -1155,7 +1539,7 @@ do
                 StartAutoKillSheriff()
                 Options.ToggleAutoKillSheriff:SetValue(true)
             end
-        end
+        end)
     })
     
     Tabs.Player:AddParagraph({
@@ -1163,7 +1547,7 @@ do
         Content = "Customize your character's movement speed and jump power."
     })
     
-    -- SEÇÃO NO CLIP (NOVA)
+    -- SEÇÃO NO CLIP
     Tabs.Player:AddParagraph({
         Title = "No Clip",
         Content = "Walk through walls and objects."
@@ -1183,11 +1567,12 @@ do
         end
     end)
     
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Player:AddKeybind("NoClipKeybind", {
         Title = "No Clip Hotkey",
         Mode = "Toggle",
         Default = "N",
-        Callback = function()
+        Callback = createHotkeyWrapper("NoClipKeybind", function()
             if noclipActive then
                 stopNoClip()
                 Options.ToggleNoClip:SetValue(false)
@@ -1195,9 +1580,31 @@ do
                 startNoClip()
                 Options.ToggleNoClip:SetValue(true)
             end
-        end
+        end)
     })
     -- FIM DA SEÇÃO NO CLIP
+    
+    -- SEÇÃO ANTI-FLING
+    Tabs.Player:AddParagraph({
+        Title = "Anti-Fling Protection",
+        Content = "Prevent other players from flinging you around."
+    })
+    
+    local ToggleAntiFling = Tabs.Player:AddToggle("ToggleAntiFling", {
+        Title = "Enable Anti-Fling",
+        Description = "Activate Anti-Fling protection",
+        Default = false
+    })
+    
+    ToggleAntiFling:OnChanged(function()
+        antiFlingConfig.enabled = Options.ToggleAntiFling.Value
+        if antiFlingConfig.enabled then
+            startAntiFling()
+        else
+            stopAntiFling()
+        end
+    end)
+    -- FIM DA SEÇÃO ANTI-FLING
     
     local WalkSpeedSlider = Tabs.Player:AddSlider("WalkSpeed", {
         Title = "Walk Speed",
@@ -1336,11 +1743,13 @@ do
         Title = "ESP Settings",
         Content = "Enable and customize ESP (Extra Sensory Perception) for players, guns, and coins."
     })
+    
     local TogglePlayerESP = Tabs.Visual:AddToggle("TogglePlayerESP", {
         Title = "Player ESP",
-        Description = "Show player roles with colored outlines",
+        Description = "Show player roles with colored outlines and names",
         Default = false
     })
+    
     TogglePlayerESP:OnChanged(function()
         espConfig.enabled = Options.TogglePlayerESP.Value
         if espConfig.enabled then
@@ -1349,43 +1758,50 @@ do
             disablePlayerESP()
         end
     end)
+    
     Tabs.Visual:AddParagraph({
         Title = "ESP Colors",
         Content = "Customize the outline colors for each player role."
     })
+    
     Tabs.Visual:AddColorpicker("MurdererColor", {
         Title = "Murderer Color",
-        Default = Color3.new(1, 0, 0),
+        Default = Color3.fromHex("#ff0000"),
         Callback = function(Value)
             espConfig.murdererColor = Value
             updateESPColors()
         end
     })
+    
     Tabs.Visual:AddColorpicker("SheriffColor", {
         Title = "Sheriff Color",
-        Default = Color3.new(0, 0, 1),
+        Default = Color3.fromHex("#0026ff"),
         Callback = function(Value)
             espConfig.sheriffColor = Value
             updateESPColors()
         end
     })
+    
     Tabs.Visual:AddColorpicker("InnocentColor", {
         Title = "Innocent Color",
-        Default = Color3.new(1, 1, 1),
+        Default = Color3.fromHex("#00ff00"),
         Callback = function(Value)
             espConfig.innocentColor = Value
             updateESPColors()
         end
     })
+    
     Tabs.Visual:AddParagraph({
         Title = "Item ESP",
         Content = "Show dropped guns and coins on the map."
     })
+    
     local ToggleGunESP = Tabs.Visual:AddToggle("ToggleGunESP", {
         Title = "Gun ESP",
         Description = "Highlight dropped guns",
         Default = false
     })
+    
     ToggleGunESP:OnChanged(function()
         espConfig.gunEnabled = Options.ToggleGunESP.Value
         if espConfig.gunEnabled then
@@ -1394,11 +1810,13 @@ do
             disableGunESP()
         end
     end)
+    
     local ToggleCoinESP = Tabs.Visual:AddToggle("ToggleCoinESP", {
         Title = "Coin ESP",
         Description = "Highlight coins on the map",
         Default = false
     })
+    
     ToggleCoinESP:OnChanged(function()
         espConfig.coinEnabled = Options.ToggleCoinESP.Value
         if espConfig.coinEnabled then
@@ -1470,12 +1888,36 @@ do
             end
         end
     })
+    
+    -- HOTKEY COM WRAPPER INDIVIDUAL
     Tabs.Troll:AddKeybind("StopFlingKeybind", {
         Title = "Stop Fling Hotkey",
         Mode = "Toggle",
         Default = "X",
-        Callback = stopFling
+        Callback = createHotkeyWrapper("StopFlingKeybind", stopFling)
     })
+    
+    -- SEÇÃO FACADURA PAREDE
+    Tabs.Troll:AddParagraph({
+        Title = "Faca Quebra Parede",
+        Content = "SOMENTE PARA MURDER - Faz suas facas atravessarem paredes e objetos."
+    })
+    
+    local ToggleGhostKnife = Tabs.Troll:AddToggle("ToggleGhostKnife", {
+        Title = "Ativar Faca Fantasma",
+        Description = "Faz as facas atravessarem qualquer coisa",
+        Default = false
+    })
+    
+    ToggleGhostKnife:OnChanged(function()
+        ghostKnifeConfig.enabled = Options.ToggleGhostKnife.Value
+        if ghostKnifeConfig.enabled then
+            startGhostKnife()
+        else
+            stopGhostKnife()
+        end
+    end)
+    -- FIM DA SEÇÃO FACADURA PAREDE
     
     Tabs.AutoFarm:AddParagraph({
         Title = "Auto Farm Settings",
@@ -1502,7 +1944,129 @@ do
             end
         end
     end)
+    
+    -- SEÇÃO DE CONFIGURAÇÃO DE HOTKEYS NA ABA SETTINGS (APARECE POR ÚLTIMO)
 end
+
+-- SEÇÃO DE CONFIGURAÇÃO DE HOTKEYS (ADICIONADA DEPOIS DO DO-END)
+-- Esta seção será a última na aba Settings
+
+Tabs.Settings:AddParagraph({
+    Title = "Hotkey Configuration",
+    Content = "Enable or disable individual hotkeys. ✅ = Enabled | ❌ = Disabled"
+})
+
+-- Get Gun Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleGetGunHotkey", {
+    Title = "Get Gun Hotkey (G)",
+    Description = "Enable/disable Get Gun hotkey",
+    Default = hotkeyConfig.GetGunKeybind.enabled
+})
+
+Options.ToggleGetGunHotkey:OnChanged(function(value)
+    hotkeyConfig.GetGunKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Silent Aim Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleSilentAimHotkey", {
+    Title = "Silent Aim Hotkey (Q)",
+    Description = "Enable/disable Silent Aim hotkey",
+    Default = hotkeyConfig.SilentKeybind.enabled
+})
+
+Options.ToggleSilentAimHotkey:OnChanged(function(value)
+    hotkeyConfig.SilentKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Kill All Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleKillAllHotkey", {
+    Title = "Kill All Hotkey (K)",
+    Description = "Enable/disable Kill All hotkey",
+    Default = hotkeyConfig.KillAllKeybind.enabled
+})
+
+Options.ToggleKillAllHotkey:OnChanged(function(value)
+    hotkeyConfig.KillAllKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Kill Selected Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleKillSelectedHotkey", {
+    Title = "Kill Selected Hotkey (L)",
+    Description = "Enable/disable Kill Selected hotkey",
+    Default = hotkeyConfig.KillSelectedKeybind.enabled
+})
+
+Options.ToggleKillSelectedHotkey:OnChanged(function(value)
+    hotkeyConfig.KillSelectedKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Auto Kill Sheriff Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleAutoKillSheriffHotkey", {
+    Title = "Auto Kill Sheriff Hotkey (J)",
+    Description = "Enable/disable Auto Kill Sheriff hotkey",
+    Default = hotkeyConfig.AutoKillSheriffKeybind.enabled
+})
+
+Options.ToggleAutoKillSheriffHotkey:OnChanged(function(value)
+    hotkeyConfig.AutoKillSheriffKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- God Mode Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleGodModeHotkey", {
+    Title = "God Mode Hotkey (H)",
+    Description = "Enable/disable God Mode hotkey",
+    Default = hotkeyConfig.GodModeKeybind.enabled
+})
+
+Options.ToggleGodModeHotkey:OnChanged(function(value)
+    hotkeyConfig.GodModeKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- No Clip Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleNoClipHotkey", {
+    Title = "No Clip Hotkey (N)",
+    Description = "Enable/disable No Clip hotkey",
+    Default = hotkeyConfig.NoClipKeybind.enabled
+})
+
+Options.ToggleNoClipHotkey:OnChanged(function(value)
+    hotkeyConfig.NoClipKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Stop Fling Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleStopFlingHotkey", {
+    Title = "Stop Fling Hotkey (X)",
+    Description = "Enable/disable Stop Fling hotkey",
+    Default = hotkeyConfig.StopFlingKeybind.enabled
+})
+
+Options.ToggleStopFlingHotkey:OnChanged(function(value)
+    hotkeyConfig.StopFlingKeybind.enabled = value
+    -- Removida a notificação
+end)
+
+-- Hotkey Status Display
+local hotkeyStatusParagraph = Tabs.Settings:AddParagraph({
+    Title = "Current Hotkey Status",
+    Content = updateHotkeyStatusText()
+})
+
+-- Botão para atualizar status
+Tabs.Settings:AddButton({
+    Title = "Refresh Hotkey Status",
+    Description = "Update the hotkey status display",
+    Callback = function()
+        hotkeyStatusParagraph:SetDesc(updateHotkeyStatusText())
+        -- Removida a notificação
+    end
+})
 
 SaveManager:SetLibrary(Fluent)
 InterfaceManager:SetLibrary(Fluent)
