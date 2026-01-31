@@ -3,7 +3,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "Pra Isabella ",
+    Title = "Pra Isabella💗 ",
     SubTitle = "by Kw",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
@@ -29,12 +29,14 @@ local Options = Fluent.Options
 local hotkeyConfig = {
     GetGunKeybind = { enabled = true, key = "G" },
     SilentKeybind = { enabled = true, key = "Q" },
+    KillMurderInstantlyKeybind = { enabled = true, key = "M" },
     KillAllKeybind = { enabled = true, key = "K" },
     KillSelectedKeybind = { enabled = true, key = "L" },
     AutoKillSheriffKeybind = { enabled = true, key = "J" },
     GodModeKeybind = { enabled = true, key = "H" },
     NoClipKeybind = { enabled = true, key = "N" },
-    StopFlingKeybind = { enabled = true, key = "X" }
+    StopFlingKeybind = { enabled = true, key = "X" },
+    PlayerESPKeybind = { enabled = true, key = "E" }
 }
 
 local sheriffConfig = {
@@ -53,8 +55,27 @@ local sheriffConfig = {
     VerticalDistanceScale = 10.50,
     LeadTime = 0.12,
     XMultiplier = 0.00,
-    ZMultiplier = -0.01
+    ZMultiplier = -0.01,
+    UnequipAfterShot = false
 }
+
+-- Cache para otimização do Silent Aim Ultra
+local botaoTela = nil
+local botaoArrastavel = false
+local tamanhoBot = 80
+local velocidadeTiro = "Medium"
+local delayTiro = 0.3
+local delayHolster = 0.0
+local podeAtirar = true
+local murderCache = nil
+local lastMurderUpdate = 0
+local pingCache = 0
+local lastPingUpdate = 0
+
+local PING_UPDATE_INTERVAL = 0.5
+local MURDER_CACHE_TIME = 0.3
+local VECTOR_ZERO = Vector3.zero
+local STATE_FREEFALL = Enum.HumanoidStateType.Freefall
 
 -- NOVO CONFIG DE CORES ESP
 local espConfig = {
@@ -62,6 +83,7 @@ local espConfig = {
     innocentColor = Color3.fromHex("#00ff00"),    -- Verde
     sheriffColor = Color3.fromHex("#0026ff"),     -- Azul
     murdererColor = Color3.fromHex("#ff0000"),    -- Vermelho
+    nameEnabled = true,
     gunEnabled = false,
     coinEnabled = false
 }
@@ -95,7 +117,6 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
-local screenButton = nil
 
 local player = game.Players.LocalPlayer
 local rs = game:GetService("RunService")
@@ -459,6 +480,9 @@ local function CreateESP(targetPlayer)
             highlight.OutlineColor = color
             label.TextColor3 = color
             label.Text = targetPlayer.Name
+            
+            -- Controlar visibilidade do nome
+            tag.Enabled = espConfig.nameEnabled
         end)
         
         -- Salvar conexão para limpeza
@@ -646,93 +670,160 @@ local function getRole(plr)
 end
 
 local function GetPing()
-    return LocalPlayer:GetNetworkPing() * 1000
+    local currentTime = tick()
+    if currentTime - lastPingUpdate > PING_UPDATE_INTERVAL then
+        pingCache = LocalPlayer:GetNetworkPing() * 1000
+        lastPingUpdate = currentTime
+    end
+    return pingCache
 end
 
-local function CalculatePrediction(target, myPos)
-    local targetPos = target.Position
-    local targetVel = target.Velocity
-    local distance = (targetPos - myPos).Magnitude
-    local leadTime = sheriffConfig.LeadTime
-    if sheriffConfig.PingPrediction then
-        leadTime = leadTime + (GetPing() / 1000) * sheriffConfig.PingSensitivity
-    end
-    if distance <= sheriffConfig.MaxPredictionDistance then
-        leadTime = leadTime + (distance / 100) * (sheriffConfig.DistanceFactor / 100)
-    end
-    local pred = targetVel * leadTime
-    local predX = pred.X * sheriffConfig.HorizontalMultiplier
-    local predY = pred.Y * sheriffConfig.VerticalMultiplier
-    local predZ = pred.Z * sheriffConfig.HorizontalMultiplier
-    local divisor = (sheriffConfig.HorizontalDivisorMin + sheriffConfig.HorizontalDivisorMax) / 20
-    predX = predX / divisor
-    predZ = predZ / divisor
-    if distance > 50 then
-        predY = predY * (1 + (distance / 100) * (sheriffConfig.VerticalDistanceScale / 100))
-    end
-    if sheriffConfig.JumpPrediction then
-        local hum = target.Parent:FindFirstChild("Humanoid")
-        if hum and hum:GetState() == Enum.HumanoidStateType.Freefall then
-            predY = predY + (targetVel.Y * 0.3)
-        end
-    end
-    predX = predX + (sheriffConfig.XMultiplier * 10)
-    predZ = predZ + (sheriffConfig.ZMultiplier * 10)
-    return targetPos + Vector3.new(predX, predY, predZ)
-end
-
-local function EquipWeapon()
+local function EquiparArmaRapido()
     local char = LocalPlayer.Character
     if not char then return false end
-    local gun = LocalPlayer.Backpack:FindFirstChild("Gun")
-    if gun then
-        local humanoid = char:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:EquipTool(gun)
-            task.wait(0.05)
+    
+    local arma = LocalPlayer.Backpack:FindFirstChild("Gun")
+    if arma then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then
+            hum:EquipTool(arma)
             return true
         end
     end
     return false
 end
 
-local function HolsterWeapon()
+local function DesequiparArmaRapido()
     local char = LocalPlayer.Character
     if not char then return end
-    local humanoid = char:FindFirstChild("Humanoid")
-    if humanoid then
-        humanoid:UnequipTools()
+    
+    local arma = char:FindFirstChild("Gun")
+    if arma then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then
+            hum:UnequipTools()
+        end
     end
 end
 
-local function FindMurder()
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-            if hrp and (player.Character:FindFirstChild("Knife") or player.Backpack:FindFirstChild("Knife")) then
-                return hrp
+local function CalcularPredicaoRapida(alvo, minhaPos)
+    local alvoPos = alvo.Position
+    local alvoVel = alvo.Velocity
+    local dist = (alvoPos - minhaPos).Magnitude
+    
+    -- Lead time base
+    local leadTime = sheriffConfig.LeadTime
+    
+    -- Ping prediction (inline)
+    if sheriffConfig.PingPrediction then
+        leadTime = leadTime + (GetPing() * 0.001 * sheriffConfig.PingSensitivity)
+    end
+    
+    -- Distance adjustment (inline)
+    if dist <= sheriffConfig.MaxPredictionDistance then
+        leadTime = leadTime + (dist * 0.01 * sheriffConfig.DistanceFactor * 0.01)
+    end
+    
+    -- Predição vetorial
+    local pred = alvoVel * leadTime
+    local divisor = (sheriffConfig.HorizontalDivisorMin + sheriffConfig.HorizontalDivisorMax) * 0.05
+    
+    local predX = (pred.X * sheriffConfig.HorizontalMultiplier / divisor) + (sheriffConfig.XMultiplier * 10)
+    local predY = pred.Y * sheriffConfig.VerticalMultiplier
+    local predZ = (pred.Z * sheriffConfig.HorizontalMultiplier / divisor) + (sheriffConfig.ZMultiplier * 10)
+    
+    -- Vertical distance scaling
+    if dist > 50 then
+        predY = predY * (1 + (dist * 0.01 * sheriffConfig.VerticalDistanceScale * 0.01))
+    end
+    
+    -- Jump prediction (inline)
+    if sheriffConfig.JumpPrediction then
+        local hum = alvo.Parent:FindFirstChild("Humanoid")
+        if hum and hum:GetState() == STATE_FREEFALL then
+            predY = predY + (alvoVel.Y * 0.3)
+        end
+    end
+    
+    return alvoPos + Vector3.new(predX, predY, predZ)
+end
+
+--// BUSCA DE MURDER COM CACHE
+local function AcharMurderRapido()
+    local currentTime = tick()
+    
+    -- Usar cache se ainda válido
+    if murderCache and (currentTime - lastMurderUpdate) < MURDER_CACHE_TIME then
+        if murderCache.Parent and murderCache.Parent.Parent then
+            return murderCache
+        end
+    end
+    
+    -- Buscar novo murder
+    local players = Players:GetPlayers()
+    for i = 1, #players do
+        local v = players[i]
+        if v ~= LocalPlayer then
+            local char = v.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    if char:FindFirstChild("Knife") or v.Backpack:FindFirstChild("Knife") then
+                        murderCache = hrp
+                        lastMurderUpdate = currentTime
+                        return hrp
+                    end
+                end
             end
         end
     end
+    
+    murderCache = nil
     return nil
 end
 
-local function ExecuteSilentAim()
+local function ExecutarSilentAimRapido()
+    -- Verificar cooldown de tiro
+    if not podeAtirar then return end
+    
     local char = LocalPlayer.Character
-    local gun = char and char:FindFirstChild("Gun")
-    if not gun then
-        if not EquipWeapon() then return end
-        task.wait(0.05)
-        gun = char:FindFirstChild("Gun")
+    if not char then return end
+    
+    local arma = char:FindFirstChild("Gun")
+    
+    -- Equipar instantaneamente se necessário
+    if not arma then
+        if not EquiparArmaRapido() then return end
+        arma = char:FindFirstChild("Gun")
+        if not arma then return end
     end
-    local target = FindMurder()
-    local event = gun and gun:FindFirstChild("Shoot")
-    if not (target and event) then return end
-    local predictionPos = CalculatePrediction(target, char.Head.Position)
-    event:FireServer(CFrame.new(char.Head.Position, predictionPos), CFrame.new(predictionPos))
-    if sheriffConfig.holsterWeapon then
-        task.wait(0.05)
-        HolsterWeapon()
+
+    local alvo = AcharMurderRapido()
+    local evento = arma:FindFirstChild("Shoot")
+
+    if alvo and evento then
+        local head = char:FindFirstChild("Head")
+        if not head then return end
+        
+        local posPredicao = CalcularPredicaoRapida(alvo, head.Position)
+        
+        -- Disparar instantaneamente
+        evento:FireServer(CFrame.new(head.Position, posPredicao), CFrame.new(posPredicao))
+        
+        -- Aplicar cooldown baseado na velocidade
+        podeAtirar = false
+        task.delay(delayTiro, function()
+            podeAtirar = true
+        end)
+        
+        -- Desequipar se configurado
+        if sheriffConfig.UnequipAfterShot then
+            if delayHolster > 0 then
+                task.delay(delayHolster, DesequiparArmaRapido)
+            else
+                task.defer(DesequiparArmaRapido)
+            end
+        end
     end
 end
 
@@ -855,36 +946,103 @@ local function ExecuteKillAll()
     root.CFrame = originalPos
 end
 
-local function CreateScreenButton()
-    if screenButton then return end
+local function CriarBotaoTela()
+    if botaoTela then return end
+    
     local sg = Instance.new("ScreenGui")
-    sg.Name = "SilentAimButton"
+    sg.Name = "SilentAimBtnUltra"
     sg.ResetOnSpawn = false
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    
+    -- Container principal
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(0, tamanhoBot, 0, tamanhoBot)
+    container.Position = UDim2.new(0.85, 0, 0.5, 0)
+    container.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    container.BackgroundTransparency = 0.3
+    container.BorderSizePixel = 0
+    container.Parent = sg
+    
+    local containerCorner = Instance.new("UICorner")
+    containerCorner.CornerRadius = UDim.new(0, 12)
+    containerCorner.Parent = container
+    
+    -- Círculo externo da mira
+    local outerCircle = Instance.new("Frame")
+    outerCircle.Size = UDim2.new(0, tamanhoBot * 0.6, 0, tamanhoBot * 0.6)
+    outerCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+    outerCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+    outerCircle.BackgroundTransparency = 1
+    outerCircle.BorderSizePixel = 0
+    outerCircle.Parent = container
+    
+    local outerStroke = Instance.new("UIStroke")
+    outerStroke.Color = Color3.fromRGB(255, 255, 255)
+    outerStroke.Thickness = 3
+    outerStroke.Parent = outerCircle
+    
+    local outerCorner = Instance.new("UICorner")
+    outerCorner.CornerRadius = UDim.new(1, 0)
+    outerCorner.Parent = outerCircle
+    
+    -- Círculo central (ponto da mira)
+    local centerDot = Instance.new("Frame")
+    centerDot.Size = UDim2.new(0, tamanhoBot * 0.15, 0, tamanhoBot * 0.15)
+    centerDot.Position = UDim2.new(0.5, 0, 0.5, 0)
+    centerDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    centerDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    centerDot.BorderSizePixel = 0
+    centerDot.Parent = container
+    
+    local centerCorner = Instance.new("UICorner")
+    centerCorner.CornerRadius = UDim.new(1, 0)
+    centerCorner.Parent = centerDot
+    
+    -- Linhas da mira (4 direções)
+    local function createAimLine(rotation, xOffset, yOffset)
+        local line = Instance.new("Frame")
+        line.Size = UDim2.new(0, 3, 0, tamanhoBot * 0.12)
+        line.Position = UDim2.new(0.5, xOffset, 0.5, yOffset)
+        line.AnchorPoint = Vector2.new(0.5, 0.5)
+        line.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        line.BorderSizePixel = 0
+        line.Rotation = rotation
+        line.Parent = container
+        
+        local lineCorner = Instance.new("UICorner")
+        lineCorner.CornerRadius = UDim.new(1, 0)
+        lineCorner.Parent = line
+    end
+    
+    -- Top
+    createAimLine(0, 0, -(tamanhoBot * 0.25))
+    -- Bottom
+    createAimLine(0, 0, tamanhoBot * 0.25)
+    -- Left
+    createAimLine(90, -(tamanhoBot * 0.25), 0)
+    -- Right
+    createAimLine(90, tamanhoBot * 0.25, 0)
+    
+    -- Botão invisível para clique
     local btn = Instance.new("TextButton")
-    btn.Name = "ShootButton"
-    btn.Size = UDim2.new(0, 80, 0, 80)
-    btn.Position = UDim2.new(0.85, 0, 0.5, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
-    btn.Text = "🎯"
-    btn.TextSize = 35
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamBold
-    btn.Parent = sg
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 15)
-    corner.Parent = btn
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(0, 0, 0)
-    stroke.Thickness = 3
-    stroke.Parent = btn
-    btn.MouseButton1Click:Connect(ExecuteSilentAim)
-    local dragging, dragInput, mousePos, framePos = false, nil, nil, nil
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.Position = UDim2.new(0, 0, 0, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
+    btn.Parent = container
+    
+    -- Click instantâneo
+    btn.MouseButton1Click:Connect(ExecutarSilentAimRapido)
+    
+    -- Sistema de drag otimizado
+    local dragging, dragInput, mousePos, framePos
+    
     btn.InputBegan:Connect(function(input)
-        if sheriffConfig.draggableButton and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+        if botaoArrastavel and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             dragging = true
             mousePos = input.Position
-            framePos = btn.Position
+            framePos = container.Position
+            
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
@@ -892,25 +1050,49 @@ local function CreateScreenButton()
             end)
         end
     end)
+    
     btn.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
+    
     UserInputService.InputChanged:Connect(function(input)
         if input == dragInput and dragging then
             local delta = input.Position - mousePos
-            btn.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+            container.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
         end
     end)
+    
     sg.Parent = game:GetService("CoreGui")
-    screenButton = sg
+    botaoTela = sg
 end
 
-local function RemoveScreenButton()
-    if screenButton then
-        screenButton:Destroy()
-        screenButton = nil
+local function RemoverBotaoTela()
+    if botaoTela then
+        botaoTela:Destroy()
+        botaoTela = nil
+    end
+end
+
+local function AtualizarTamanhoBotao(novoTamanho)
+    tamanhoBot = novoTamanho
+    if botaoTela then
+        RemoverBotaoTela()
+        CriarBotaoTela()
+    end
+end
+
+local function AtualizarVelocidadeTiro(modo)
+    velocidadeTiro = modo
+    if modo == "Slow" then
+        delayTiro = 0.6
+    elseif modo == "Medium" then
+        delayTiro = 0.3
+    elseif modo == "Fast" then
+        delayTiro = 0.1
+    else
+        delayTiro = 0.3
     end
 end
 
@@ -1144,6 +1326,34 @@ local function disableCoinESP()
     end
 end
 
+-- FUNÇÃO KILL MURDER INSTANTLY (WALLBANG)
+local function ExecuteWallbang()
+    local char = LocalPlayer.Character
+    local gun = char and (char:FindFirstChild("Gun") or LocalPlayer.Backpack:FindFirstChild("Gun"))
+
+    if not gun then return end
+
+    local event = gun:FindFirstChild("Shoot")
+    local murderer = nil
+
+    for _, v in pairs(Players:GetPlayers()) do
+        if v ~= LocalPlayer and v.Character and (v.Character:FindFirstChild("Knife") or v.Backpack:FindFirstChild("Knife")) then
+            murderer = v.Character
+            break
+        end
+    end
+
+    if murderer and event then
+        local targetHRP = murderer:FindFirstChild("HumanoidRootPart")
+        if targetHRP then
+            local targetPos = targetHRP.Position + (targetHRP.Velocity * 0.12)
+            local direction = CFrame.new(targetPos + Vector3.new(0, 5, 0), targetPos)
+            local position = CFrame.new(targetPos)
+            event:FireServer(direction, position, "C")
+        end
+    end
+end
+
 do
     Tabs.Sheriff:AddParagraph({
         Title = "Sheriff Tools",
@@ -1163,6 +1373,10 @@ do
         Callback = createHotkeyWrapper("GetGunKeybind", GetGun)
     })
     
+    Options.GetGunKeybind:OnChanged(function()
+        hotkeyConfig.GetGunKeybind.key = Options.GetGunKeybind.Value
+    end)
+    
     Tabs.Sheriff:AddParagraph({
         Title = "Silent Aim",
         Content = "Advanced prediction system to shoot the Murderer with precision. The script automatically equips the weapon."
@@ -1173,9 +1387,9 @@ do
         Callback = function(v)
             sheriffConfig.showButton = v
             if v then 
-                CreateScreenButton()
+                CriarBotaoTela()
             else 
-                RemoveScreenButton()
+                RemoverBotaoTela()
             end
         end
     })
@@ -1183,14 +1397,51 @@ do
         Title = "Allow Dragging Button",
         Default = false,
         Callback = function(v)
-            sheriffConfig.draggableButton = v
+            botaoArrastavel = v
+        end
+    })
+    Tabs.Sheriff:AddSlider("TamanhoBotao", {
+        Title = "Button Size",
+        Description = "Adjust the size of the on-screen button",
+        Default = 80,
+        Min = 50,
+        Max = 150,
+        Rounding = 0,
+        Callback = function(v)
+            AtualizarTamanhoBotao(v)
+        end
+    })
+    Tabs.Sheriff:AddDropdown("VelocidadeTiro", {
+        Title = "Fire Rate",
+        Description = "Control the cooldown speed between shots",
+        Values = {"Slow", "Medium", "Fast"},
+        Default = "Medium",
+        Callback = function(v)
+            AtualizarVelocidadeTiro(v)
         end
     })
     Tabs.Sheriff:AddToggle("ToggleHolster", {
         Title = "Unequip Weapon After Shot",
         Default = false,
         Callback = function(v)
-            sheriffConfig.holsterWeapon = v
+            sheriffConfig.UnequipAfterShot = v
+        end
+    })
+    Tabs.Sheriff:AddDropdown("HolsterSpeed", {
+        Title = "Holster Speed",
+        Description = "How fast the weapon is unequipped after shooting",
+        Values = {"Instant", "Fast", "Medium", "Slow"},
+        Default = "Instant",
+        Callback = function(v)
+            if v == "Instant" then
+                delayHolster = 0.0
+            elseif v == "Fast" then
+                delayHolster = 0.15
+            elseif v == "Medium" then
+                delayHolster = 0.35
+            elseif v == "Slow" then
+                delayHolster = 0.6
+            end
         end
     })
     
@@ -1199,8 +1450,36 @@ do
         Title = "Silent Aim Hotkey",
         Mode = "Toggle",
         Default = "Q",
-        Callback = createHotkeyWrapper("SilentKeybind", ExecuteSilentAim)
+        Callback = createHotkeyWrapper("SilentKeybind", ExecutarSilentAimRapido)
     })
+    
+    Options.SilentKeybind:OnChanged(function()
+        hotkeyConfig.SilentKeybind.key = Options.SilentKeybind.Value
+    end)
+    
+    -- SEÇÃO KILL MURDER INSTANTLY
+    Tabs.Sheriff:AddParagraph({
+        Title = "Kill Murder Instantly",
+        Content = "Dispara diretamente no Murderer através de paredes. Requer a arma equipada ou no inventário."
+    })
+    
+    Tabs.Sheriff:AddButton({
+        Title = "Kill Murder Instantly",
+        Description = "Shoot the murderer through walls instantly",
+        Callback = ExecuteWallbang
+    })
+    
+    Tabs.Sheriff:AddKeybind("KillMurderInstantlyKeybind", {
+        Title = "Kill Murder Instantly Hotkey",
+        Mode = "Toggle",
+        Default = "M",
+        Callback = createHotkeyWrapper("KillMurderInstantlyKeybind", ExecuteWallbang)
+    })
+    
+    Options.KillMurderInstantlyKeybind:OnChanged(function()
+        hotkeyConfig.KillMurderInstantlyKeybind.key = Options.KillMurderInstantlyKeybind.Value
+    end)
+    -- FIM DA SEÇÃO KILL MURDER INSTANTLY
     
     Tabs.Sheriff:AddParagraph({
         Title = "Advanced Prediction",
@@ -1424,6 +1703,10 @@ do
             end
         end)
     })
+    
+    Options.GodModeKeybind:OnChanged(function()
+        hotkeyConfig.GodModeKeybind.key = Options.GodModeKeybind.Value
+    end)
     -- FIM DA SEÇÃO GOD MODE
     
     Tabs.Murder:AddButton({
@@ -1439,6 +1722,10 @@ do
         Default = "K",
         Callback = createHotkeyWrapper("KillAllKeybind", ExecuteKillAll)
     })
+    
+    Options.KillAllKeybind:OnChanged(function()
+        hotkeyConfig.KillAllKeybind.key = Options.KillAllKeybind.Value
+    end)
     
     -- KILL INDIVIDUAL
     Tabs.Murder:AddParagraph({
@@ -1507,6 +1794,10 @@ do
         Default = "L",
         Callback = createHotkeyWrapper("KillSelectedKeybind", KillSelectedPlayer)
     })
+    
+    Options.KillSelectedKeybind:OnChanged(function()
+        hotkeyConfig.KillSelectedKeybind.key = Options.KillSelectedKeybind.Value
+    end)
     -- FIM DO KILL INDIVIDUAL
     
     Tabs.Murder:AddParagraph({
@@ -1541,6 +1832,10 @@ do
             end
         end)
     })
+    
+    Options.AutoKillSheriffKeybind:OnChanged(function()
+        hotkeyConfig.AutoKillSheriffKeybind.key = Options.AutoKillSheriffKeybind.Value
+    end)
     
     Tabs.Player:AddParagraph({
         Title = "Movement Settings",
@@ -1582,6 +1877,10 @@ do
             end
         end)
     })
+    
+    Options.NoClipKeybind:OnChanged(function()
+        hotkeyConfig.NoClipKeybind.key = Options.NoClipKeybind.Value
+    end)
     -- FIM DA SEÇÃO NO CLIP
     
     -- SEÇÃO ANTI-FLING
@@ -1759,6 +2058,38 @@ do
         end
     end)
     
+    -- HOTKEY ESP PLAYER
+    Tabs.Visual:AddKeybind("PlayerESPKeybind", {
+        Title = "Player ESP Hotkey",
+        Mode = "Toggle",
+        Default = "E",
+        Callback = createHotkeyWrapper("PlayerESPKeybind", function()
+            if espConfig.enabled then
+                disablePlayerESP()
+                espConfig.enabled = false
+                Options.TogglePlayerESP:SetValue(false)
+            else
+                enablePlayerESP()
+                espConfig.enabled = true
+                Options.TogglePlayerESP:SetValue(true)
+            end
+        end)
+    })
+    
+    Options.PlayerESPKeybind:OnChanged(function()
+        hotkeyConfig.PlayerESPKeybind.key = Options.PlayerESPKeybind.Value
+    end)
+    
+    local ToggleESPName = Tabs.Visual:AddToggle("ToggleESPName", {
+        Title = "ESP Name",
+        Description = "Show/hide player names above the outlines",
+        Default = true
+    })
+    
+    ToggleESPName:OnChanged(function()
+        espConfig.nameEnabled = Options.ToggleESPName.Value
+    end)
+    
     Tabs.Visual:AddParagraph({
         Title = "ESP Colors",
         Content = "Customize the outline colors for each player role."
@@ -1897,6 +2228,10 @@ do
         Callback = createHotkeyWrapper("StopFlingKeybind", stopFling)
     })
     
+    Options.StopFlingKeybind:OnChanged(function()
+        hotkeyConfig.StopFlingKeybind.key = Options.StopFlingKeybind.Value
+    end)
+    
     -- SEÇÃO FACADURA PAREDE
     Tabs.Troll:AddParagraph({
         Title = "Faca Quebra Parede",
@@ -1958,7 +2293,7 @@ Tabs.Settings:AddParagraph({
 
 -- Get Gun Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleGetGunHotkey", {
-    Title = "Get Gun Hotkey (G)",
+    Title = "Get Gun Hotkey",
     Description = "Enable/disable Get Gun hotkey",
     Default = hotkeyConfig.GetGunKeybind.enabled
 })
@@ -1970,7 +2305,7 @@ end)
 
 -- Silent Aim Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleSilentAimHotkey", {
-    Title = "Silent Aim Hotkey (Q)",
+    Title = "Silent Aim Hotkey",
     Description = "Enable/disable Silent Aim hotkey",
     Default = hotkeyConfig.SilentKeybind.enabled
 })
@@ -1980,9 +2315,20 @@ Options.ToggleSilentAimHotkey:OnChanged(function(value)
     -- Removida a notificação
 end)
 
+-- Kill Murder Instantly Hotkey Toggle
+Tabs.Settings:AddToggle("ToggleKillMurderInstantlyHotkey", {
+    Title = "Kill Murder Instantly Hotkey",
+    Description = "Enable/disable Kill Murder Instantly hotkey",
+    Default = hotkeyConfig.KillMurderInstantlyKeybind.enabled
+})
+
+Options.ToggleKillMurderInstantlyHotkey:OnChanged(function(value)
+    hotkeyConfig.KillMurderInstantlyKeybind.enabled = value
+end)
+
 -- Kill All Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleKillAllHotkey", {
-    Title = "Kill All Hotkey (K)",
+    Title = "Kill All Hotkey",
     Description = "Enable/disable Kill All hotkey",
     Default = hotkeyConfig.KillAllKeybind.enabled
 })
@@ -1994,7 +2340,7 @@ end)
 
 -- Kill Selected Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleKillSelectedHotkey", {
-    Title = "Kill Selected Hotkey (L)",
+    Title = "Kill Selected Hotkey",
     Description = "Enable/disable Kill Selected hotkey",
     Default = hotkeyConfig.KillSelectedKeybind.enabled
 })
@@ -2006,7 +2352,7 @@ end)
 
 -- Auto Kill Sheriff Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleAutoKillSheriffHotkey", {
-    Title = "Auto Kill Sheriff Hotkey (J)",
+    Title = "Auto Kill Sheriff Hotkey",
     Description = "Enable/disable Auto Kill Sheriff hotkey",
     Default = hotkeyConfig.AutoKillSheriffKeybind.enabled
 })
@@ -2018,7 +2364,7 @@ end)
 
 -- God Mode Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleGodModeHotkey", {
-    Title = "God Mode Hotkey (H)",
+    Title = "God Mode Hotkey",
     Description = "Enable/disable God Mode hotkey",
     Default = hotkeyConfig.GodModeKeybind.enabled
 })
@@ -2030,7 +2376,7 @@ end)
 
 -- No Clip Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleNoClipHotkey", {
-    Title = "No Clip Hotkey (N)",
+    Title = "No Clip Hotkey",
     Description = "Enable/disable No Clip hotkey",
     Default = hotkeyConfig.NoClipKeybind.enabled
 })
@@ -2042,7 +2388,7 @@ end)
 
 -- Stop Fling Hotkey Toggle
 Tabs.Settings:AddToggle("ToggleStopFlingHotkey", {
-    Title = "Stop Fling Hotkey (X)",
+    Title = "Stop Fling Hotkey",
     Description = "Enable/disable Stop Fling hotkey",
     Default = hotkeyConfig.StopFlingKeybind.enabled
 })
@@ -2050,6 +2396,17 @@ Tabs.Settings:AddToggle("ToggleStopFlingHotkey", {
 Options.ToggleStopFlingHotkey:OnChanged(function(value)
     hotkeyConfig.StopFlingKeybind.enabled = value
     -- Removida a notificação
+end)
+
+-- Player ESP Hotkey Toggle
+Tabs.Settings:AddToggle("TogglePlayerESPHotkey", {
+    Title = "Player ESP Hotkey",
+    Description = "Enable/disable Player ESP hotkey",
+    Default = hotkeyConfig.PlayerESPKeybind.enabled
+})
+
+Options.TogglePlayerESPHotkey:OnChanged(function(value)
+    hotkeyConfig.PlayerESPKeybind.enabled = value
 end)
 
 -- Hotkey Status Display
