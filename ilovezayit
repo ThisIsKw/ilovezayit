@@ -3,7 +3,7 @@ local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/d
 local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/dawid-scripts/Fluent/master/Addons/InterfaceManager.lua"))()
 
 local Window = Fluent:CreateWindow({
-    Title = "Pra Isabella💗 ",
+    Title = "Pra Isabella Perfeita 💗 ",
     SubTitle = "by Kw",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
@@ -25,7 +25,7 @@ local Tabs = {
 
 local Options = Fluent.Options
 
--- CONFIGURAÇÃO INDIVIDUAL DE HOTKEYS
+-- INDIVIDUAL HOTKEY CONFIGURATION
 local hotkeyConfig = {
     GetGunKeybind = { enabled = true, key = "G" },
     SilentKeybind = { enabled = true, key = "Q" },
@@ -59,7 +59,7 @@ local sheriffConfig = {
     UnequipAfterShot = false
 }
 
--- Cache para otimização do Silent Aim Ultra
+-- Cache for Silent Aim Ultra optimization
 local botaoTela = nil
 local botaoArrastavel = false
 local tamanhoBot = 80
@@ -147,20 +147,20 @@ local godModeConnection = nil
 local ESP_Folder = nil
 local hitboxRunning = false
 
--- Variáveis para o novo ESP
+-- Variables for new ESP
 local espRunning = false
 local espConnections = {}
 
--- Variáveis para Faca Quebra Parede
+-- Variables for Ghost Knife
 local ghostActive = false
 local ghostConnections = {}
 
--- FUNÇÃO PARA VERIFICAR SE UMA HOTKEY ESPECÍFICA ESTÁ ATIVA
+-- FUNCTION TO CHECK IF A SPECIFIC HOTKEY IS ACTIVE
 local function isHotkeyEnabled(hotkeyName)
     return hotkeyConfig[hotkeyName] and hotkeyConfig[hotkeyName].enabled
 end
 
--- WRAPPER PARA HOTKEYS INDIVIDUAIS
+-- WRAPPER FOR INDIVIDUAL HOTKEYS
 local function createHotkeyWrapper(hotkeyName, callback)
     return function()
         if isHotkeyEnabled(hotkeyName) then
@@ -169,7 +169,7 @@ local function createHotkeyWrapper(hotkeyName, callback)
     end
 end
 
--- FUNÇÃO PARA ATUALIZAR O TEXTO DA HOTKEY COM STATUS
+-- FUNCTION TO UPDATE HOTKEY STATUS TEXT
 local function updateHotkeyStatusText()
     local statusText = "Hotkey Status:\n"
     for name, config in pairs(hotkeyConfig) do
@@ -206,11 +206,11 @@ local function startGhostKnife()
         end
     end
 
-    -- Conectar evento para novas facas
+    -- Connect event for new knives
     local childAddedConnection = workspace.ChildAdded:Connect(BloquearRaycast)
     table.insert(ghostConnections, childAddedConnection)
     
-    -- Loop para limpar facas existentes
+    -- Loop to clean up existing knives
     local cleanupConnection = task.spawn(function()
         while ghostActive do
             for _, v in pairs(workspace:GetChildren()) do
@@ -298,7 +298,7 @@ local function startGodMode()
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             
             if hum then
-                -- Mantém a vida sempre em 100
+                -- Keep health always at 100
                 if hum.Health < 100 then
                     hum.Health = 100
                 end
@@ -346,6 +346,9 @@ local function CreateBox(targetPlayer)
     return box
 end
 
+-- NOVA ABORDAGEM: Aumenta a HumanoidRootPart dos inimigos, não a faca
+local originalSizes = {}  -- Armazena tamanhos originais
+
 local function startHitbox()
     if hitboxRunning then return end
     
@@ -353,43 +356,44 @@ local function startHitbox()
     hitboxRunning = true
     
     rs.RenderStepped:Connect(function()
-        -- 1. LÓGICA DA HITBOX (FACA)
         if hitboxConfig.enabled then
-            local char = player.Character
-            local knife = char and char:FindFirstChild("Knife")
-            if knife and knife:FindFirstChild("Handle") then
-                local handle = knife.Handle
-                handle.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
-                handle.Transparency = hitboxConfig.transparency
-                handle.CanCollide = false 
-                handle.Massless = true    
-                handle.Color = hitboxConfig.color
-            end
-        end
-
-        -- 2. LÓGICA DO ESP (ACOMPANHANDO O TAMANHO)
-        for _, p in pairs(game.Players:GetPlayers()) do
-            if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                local root = p.Character.HumanoidRootPart
-                local esp = ESP_Folder:FindFirstChild("HITBOX_" .. p.Name) or CreateBox(p)
-                
-                if hitboxConfig.visible then
-                    esp.Adornee = root
-                    esp.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
-                    esp.Color3 = hitboxConfig.color
-                    esp.Transparency = hitboxConfig.transparency
-                    esp.Visible = true
-                else
-                    esp.Visible = false
+            -- Aumenta a hitbox dos PLAYERS (não da faca)
+            for _, p in pairs(game.Players:GetPlayers()) do
+                if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                    local root = p.Character.HumanoidRootPart
+                    
+                    -- Salva o tamanho original na primeira vez
+                    if not originalSizes[p.Name] then
+                        originalSizes[p.Name] = root.Size
+                    end
+                    
+                    -- Aumenta a hitbox do player
+                    root.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
+                    root.CanCollide = false
+                    root.Transparency = 1  -- Invisible to avoid looking strange
+                    
+                    -- Visual ESP (colored box)
+                    local esp = ESP_Folder:FindFirstChild("HITBOX_" .. p.Name) or CreateBox(p)
+                    
+                    if hitboxConfig.visible then
+                        esp.Adornee = root
+                        esp.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
+                        esp.Color3 = hitboxConfig.color
+                        esp.Transparency = hitboxConfig.transparency
+                        esp.Visible = true
+                    else
+                        esp.Visible = false
+                    end
                 end
             end
         end
     end)
     
-    -- Limpeza automática
+    -- Automatic cleanup when player leaves
     game.Players.PlayerRemoving:Connect(function(p)
         local oldEsp = ESP_Folder:FindFirstChild("HITBOX_" .. p.Name)
         if oldEsp then oldEsp:Destroy() end
+        originalSizes[p.Name] = nil
     end)
 end
 
@@ -403,16 +407,25 @@ local function stopHitbox()
         end
     end
     
-    -- Resetar faca
-    local char = player.Character
-    local knife = char and char:FindFirstChild("Knife")
-    if knife and knife:FindFirstChild("Handle") then
-        local handle = knife.Handle
-        handle.Size = Vector3.new(1, 1, 1) -- Tamanho padrão
-        handle.Transparency = 0
-        handle.CanCollide = true
-        handle.Massless = false
+    -- Restaurar tamanhos originais dos players
+    for _, p in pairs(game.Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local root = p.Character.HumanoidRootPart
+            
+            -- Restaura tamanho original
+            if originalSizes[p.Name] then
+                root.Size = originalSizes[p.Name]
+            else
+                root.Size = Vector3.new(2, 2, 1)  -- Tamanho padrão do Roblox
+            end
+            
+            root.CanCollide = false  -- Mantém false (padrão MM2)
+            root.Transparency = 1  -- Mantém invisível (padrão)
+        end
     end
+    
+    -- Limpa a tabela de tamanhos originais
+    originalSizes = {}
 end
 
 -- NOVO SISTEMA ESP
@@ -435,7 +448,7 @@ local function CreateESP(targetPlayer)
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         
-        -- 2. Tag com nome
+        -- 2. Tag with name
         local tag = root:FindFirstChild("SunTag") or Instance.new("BillboardGui")
         tag.Name = "SunTag"
         tag.Size = UDim2.new(0, 200, 0, 50)
@@ -485,7 +498,7 @@ local function CreateESP(targetPlayer)
             tag.Enabled = espConfig.nameEnabled
         end)
         
-        -- Salvar conexão para limpeza
+        -- Save connection for cleanup
         table.insert(espConnections, {
             player = targetPlayer,
             connection = updateConnection,
@@ -526,7 +539,7 @@ local function enablePlayerESP()
     end
     espConnections = {}
     
-    -- Criar ESP para todos os jogadores
+    -- Create ESP for all players
     for _, plr in pairs(Players:GetPlayers()) do
         CreateESP(plr)
     end
@@ -588,7 +601,7 @@ end
 local function updateESPColors()
     if not espRunning then return end
     
-    -- Atualizar cores para todos os jogadores com ESP ativo
+    -- Update colors for all players with active ESP
     for _, plr in pairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
             local highlight = plr.Character:FindFirstChild("SunHighlight")
@@ -618,7 +631,7 @@ local function updateESPColors()
     end
 end
 
--- Função NoClip
+-- NoClip Function
 local function startNoClip()
     if noclipConnection then
         noclipConnection:Disconnect()
@@ -678,7 +691,7 @@ local function GetPing()
     return pingCache
 end
 
-local function EquiparArmaRapido()
+local function EquipWeaponFast()
     local char = LocalPlayer.Character
     if not char then return false end
     
@@ -791,9 +804,9 @@ local function ExecutarSilentAimRapido()
     
     local arma = char:FindFirstChild("Gun")
     
-    -- Equipar instantaneamente se necessário
+    -- Equip instantly if necessary
     if not arma then
-        if not EquiparArmaRapido() then return end
+        if not EquipWeaponFast() then return end
         arma = char:FindFirstChild("Gun")
         if not arma then return end
     end
@@ -1075,15 +1088,15 @@ local function RemoverBotaoTela()
     end
 end
 
-local function AtualizarTamanhoBotao(novoTamanho)
-    tamanhoBot = novoTamanho
+local function UpdateButtonSize(newSize)
+    tamanhoBot = newSize
     if botaoTela then
         RemoverBotaoTela()
         CriarBotaoTela()
     end
 end
 
-local function AtualizarVelocidadeTiro(modo)
+local function UpdateFireRate(mode)
     velocidadeTiro = modo
     if modo == "Slow" then
         delayTiro = 0.6
@@ -1408,7 +1421,7 @@ do
         Max = 150,
         Rounding = 0,
         Callback = function(v)
-            AtualizarTamanhoBotao(v)
+            UpdateButtonSize(v)
         end
     })
     Tabs.Sheriff:AddDropdown("VelocidadeTiro", {
@@ -1417,7 +1430,7 @@ do
         Values = {"Slow", "Medium", "Fast"},
         Default = "Medium",
         Callback = function(v)
-            AtualizarVelocidadeTiro(v)
+            UpdateFireRate(v)
         end
     })
     Tabs.Sheriff:AddToggle("ToggleHolster", {
@@ -1460,7 +1473,7 @@ do
     -- SEÇÃO KILL MURDER INSTANTLY
     Tabs.Sheriff:AddParagraph({
         Title = "Kill Murder Instantly",
-        Content = "Dispara diretamente no Murderer através de paredes. Requer a arma equipada ou no inventário."
+        Content = "Shoots directly at the Murderer through walls. Requires the weapon equipped or in inventory."
     })
     
     Tabs.Sheriff:AddButton({
@@ -1479,7 +1492,7 @@ do
     Options.KillMurderInstantlyKeybind:OnChanged(function()
         hotkeyConfig.KillMurderInstantlyKeybind.key = Options.KillMurderInstantlyKeybind.Value
     end)
-    -- FIM DA SEÇÃO KILL MURDER INSTANTLY
+    -- END OF KILL MURDER INSTANTLY SECTION
     
     Tabs.Sheriff:AddParagraph({
         Title = "Advanced Prediction",
@@ -1670,7 +1683,7 @@ do
     -- SEÇÃO GOD MODE
     Tabs.Murder:AddParagraph({
         Title = "God Mode",
-        Content = "Tank Mode - Aguenta pelo menos um tiro do Sheriff. Mantém sua vida em 100 e previne quedas."
+        Content = "Tank Mode - Survives at least one shot from the Sheriff. Keeps your health at 100 and prevents falling."
     })
     
     local ToggleGodMode = Tabs.Murder:AddToggle("ToggleGodMode", {
@@ -1707,7 +1720,7 @@ do
     Options.GodModeKeybind:OnChanged(function()
         hotkeyConfig.GodModeKeybind.key = Options.GodModeKeybind.Value
     end)
-    -- FIM DA SEÇÃO GOD MODE
+    -- END OF GOD MODE SECTION
     
     Tabs.Murder:AddButton({
         Title = "Kill All",
@@ -1798,7 +1811,7 @@ do
     Options.KillSelectedKeybind:OnChanged(function()
         hotkeyConfig.KillSelectedKeybind.key = Options.KillSelectedKeybind.Value
     end)
-    -- FIM DO KILL INDIVIDUAL
+    -- END OF INDIVIDUAL KILL SECTION
     
     Tabs.Murder:AddParagraph({
         Title = "Auto Kill Sheriff",
@@ -1881,7 +1894,7 @@ do
     Options.NoClipKeybind:OnChanged(function()
         hotkeyConfig.NoClipKeybind.key = Options.NoClipKeybind.Value
     end)
-    -- FIM DA SEÇÃO NO CLIP
+    -- END OF NO CLIP SECTION
     
     -- SEÇÃO ANTI-FLING
     Tabs.Player:AddParagraph({
@@ -1903,7 +1916,7 @@ do
             stopAntiFling()
         end
     end)
-    -- FIM DA SEÇÃO ANTI-FLING
+    -- END OF ANTI-FLING SECTION
     
     local WalkSpeedSlider = Tabs.Player:AddSlider("WalkSpeed", {
         Title = "Walk Speed",
@@ -2234,13 +2247,13 @@ do
     
     -- SEÇÃO FACADURA PAREDE
     Tabs.Troll:AddParagraph({
-        Title = "Faca Quebra Parede",
-        Content = "SOMENTE PARA MURDER - Faz suas facas atravessarem paredes e objetos."
+        Title = "Ghost Knife",
+        Content = "FOR MURDER ONLY - Makes your knives pass through walls and objects."
     })
     
     local ToggleGhostKnife = Tabs.Troll:AddToggle("ToggleGhostKnife", {
-        Title = "Ativar Faca Fantasma",
-        Description = "Faz as facas atravessarem qualquer coisa",
+        Title = "Enable Ghost Knife",
+        Description = "Makes knives pass through anything",
         Default = false
     })
     
@@ -2252,7 +2265,7 @@ do
             stopGhostKnife()
         end
     end)
-    -- FIM DA SEÇÃO FACADURA PAREDE
+    -- END OF GHOST KNIFE SECTION
     
     Tabs.AutoFarm:AddParagraph({
         Title = "Auto Farm Settings",
@@ -2280,11 +2293,11 @@ do
         end
     end)
     
-    -- SEÇÃO DE CONFIGURAÇÃO DE HOTKEYS NA ABA SETTINGS (APARECE POR ÚLTIMO)
+    -- HOTKEY CONFIGURATION SECTION IN SETTINGS TAB (APPEARS LAST)
 end
 
--- SEÇÃO DE CONFIGURAÇÃO DE HOTKEYS (ADICIONADA DEPOIS DO DO-END)
--- Esta seção será a última na aba Settings
+-- HOTKEY CONFIGURATION SECTION (ADDED AFTER DO-END)
+-- This section will be the last in the Settings tab
 
 Tabs.Settings:AddParagraph({
     Title = "Hotkey Configuration",
