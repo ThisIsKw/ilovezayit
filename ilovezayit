@@ -46,16 +46,14 @@ local sheriffConfig = {
     PingPrediction = true,
     PingSensitivity = 1.18,
     JumpPrediction = true,
-    HorizontalMultiplier = 0.79,
-    VerticalMultiplier = 0.79,
-    HorizontalDivisorMin = 10.00,
-    HorizontalDivisorMax = 12.00,
+    HorizontalMultiplier = 1.0,
+    VerticalMultiplier = 1.0,
     MaxPredictionDistance = 350.00,
-    DistanceFactor = 12.00,
-    VerticalDistanceScale = 10.50,
-    LeadTime = 0.12,
+    DistanceFactor = 5.00,
+    VerticalDistanceScale = 2.00,
+    LeadTime = 0.05,
     XMultiplier = 0.00,
-    ZMultiplier = -0.01,
+    ZMultiplier = 0.00,
     UnequipAfterShot = false
 }
 
@@ -63,6 +61,7 @@ local sheriffConfig = {
 local botaoTela = nil
 local botaoArrastavel = false
 local tamanhoBot = 80
+local savedBotaoPos = UDim2.new(0.85, 0, 0.5, 0) -- posição salva do botão
 local velocidadeTiro = "Medium"
 local delayTiro = 0.3
 local delayHolster = 0.0
@@ -448,13 +447,15 @@ local function CreateESP(targetPlayer)
         highlight.OutlineTransparency = 0
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         
-        -- 2. Tag with name
-        local tag = root:FindFirstChild("SunTag") or Instance.new("BillboardGui")
+        -- 2. Tag with name (parented to Head to avoid hitbox resize conflict)
+        local head = character:FindFirstChild("Head")
+        local tagParent = head or root
+        local tag = tagParent:FindFirstChild("SunTag") or Instance.new("BillboardGui")
         tag.Name = "SunTag"
         tag.Size = UDim2.new(0, 200, 0, 50)
         tag.AlwaysOnTop = true
-        tag.ExtentsOffset = Vector3.new(0, -3.5, 0)
-        tag.Parent = root
+        tag.StudsOffset = Vector3.new(0, 2.5, 0)
+        tag.Parent = tagParent
         
         local label = tag:FindFirstChild("Label") or Instance.new("TextLabel")
         label.Name = "Label"
@@ -594,6 +595,16 @@ local function disablePlayerESP()
             if highlight then
                 highlight:Destroy()
             end
+            local head = plr.Character:FindFirstChild("Head")
+            if head then
+                local tag = head:FindFirstChild("SunTag")
+                if tag then tag:Destroy() end
+            end
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local tag = hrp:FindFirstChild("SunTag")
+                if tag then tag:Destroy() end
+            end
         end
     end
 end
@@ -605,8 +616,9 @@ local function updateESPColors()
     for _, plr in pairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
             local highlight = plr.Character:FindFirstChild("SunHighlight")
-            local tag = plr.Character:FindFirstChild("HumanoidRootPart") and 
-                       plr.Character.HumanoidRootPart:FindFirstChild("SunTag")
+            local head = plr.Character:FindFirstChild("Head")
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            local tag = (head and head:FindFirstChild("SunTag")) or (hrp and hrp:FindFirstChild("SunTag"))
             
             if highlight and tag then
                 local label = tag:FindFirstChild("Label")
@@ -720,45 +732,55 @@ local function DesequiparArmaRapido()
 end
 
 local function CalcularPredicaoRapida(alvo, minhaPos)
-    local alvoPos = alvo.Position
+    -- Buscar Head do alvo para mirar na cabeça (kill shot)
+    local alvoHead = alvo.Parent and alvo.Parent:FindFirstChild("Head")
+    local alvoPos = (alvoHead and alvoHead.Position) or alvo.Position
     local alvoVel = alvo.Velocity
     local dist = (alvoPos - minhaPos).Magnitude
-    
-    -- Lead time base
-    local leadTime = sheriffConfig.LeadTime
-    
-    -- Ping prediction (inline)
+
+    -- Velocidade do projétil do jogo (studs/s) — valor base do MM2
+    local bulletSpeed = 500
+
+    -- Tempo de voo do projétil até o alvo atual
+    local travelTime = dist / bulletSpeed
+
+    -- Adiciona compensação de ping
     if sheriffConfig.PingPrediction then
-        leadTime = leadTime + (GetPing() * 0.001 * sheriffConfig.PingSensitivity)
+        travelTime = travelTime + (GetPing() * 0.001 * sheriffConfig.PingSensitivity)
     end
-    
-    -- Distance adjustment (inline)
+
+    -- Adiciona o LeadTime base (fine-tune manual do jogador)
+    travelTime = travelTime + sheriffConfig.LeadTime
+
+    -- Posição predita = posição atual + velocidade * tempo total
+    local predPos = alvoPos + (alvoVel * travelTime)
+
+    -- Ajuste fino de eixo X e Z usando os multipliers do config
+    -- DistanceFactor escala proporcionalmente à distância (máximo até MaxPredictionDistance)
+    local distScale = 1.0
     if dist <= sheriffConfig.MaxPredictionDistance then
-        leadTime = leadTime + (dist * 0.01 * sheriffConfig.DistanceFactor * 0.01)
+        distScale = 1.0 + (dist / sheriffConfig.MaxPredictionDistance) * (sheriffConfig.DistanceFactor * 0.1)
     end
-    
-    -- Predição vetorial
-    local pred = alvoVel * leadTime
-    local divisor = (sheriffConfig.HorizontalDivisorMin + sheriffConfig.HorizontalDivisorMax) * 0.05
-    
-    local predX = (pred.X * sheriffConfig.HorizontalMultiplier / divisor) + (sheriffConfig.XMultiplier * 10)
-    local predY = pred.Y * sheriffConfig.VerticalMultiplier
-    local predZ = (pred.Z * sheriffConfig.HorizontalMultiplier / divisor) + (sheriffConfig.ZMultiplier * 10)
-    
-    -- Vertical distance scaling
+
+    local offsetX = (alvoVel.X * travelTime) * (sheriffConfig.HorizontalMultiplier - 1.0) * distScale + (sheriffConfig.XMultiplier)
+    local offsetZ = (alvoVel.Z * travelTime) * (sheriffConfig.HorizontalMultiplier - 1.0) * distScale + (sheriffConfig.ZMultiplier)
+    local offsetY = (alvoVel.Y * travelTime) * (sheriffConfig.VerticalMultiplier - 1.0)
+
+    -- Ajuste vertical por distância (compensa gravidade em tiros longos)
     if dist > 50 then
-        predY = predY * (1 + (dist * 0.01 * sheriffConfig.VerticalDistanceScale * 0.01))
+        offsetY = offsetY + (dist / sheriffConfig.MaxPredictionDistance) * sheriffConfig.VerticalDistanceScale * 0.1
     end
-    
-    -- Jump prediction (inline)
+
+    -- Jump prediction: se o alvo estiver em queda livre, compensa a gravidade
     if sheriffConfig.JumpPrediction then
-        local hum = alvo.Parent:FindFirstChild("Humanoid")
+        local hum = alvo.Parent and alvo.Parent:FindFirstChild("Humanoid")
         if hum and hum:GetState() == STATE_FREEFALL then
-            predY = predY + (alvoVel.Y * 0.3)
+            -- gravidade do Roblox = -65 studs/s² aprox, compensa pro tempo de voo
+            offsetY = offsetY - (0.5 * 65 * travelTime * travelTime)
         end
     end
-    
-    return alvoPos + Vector3.new(predX, predY, predZ)
+
+    return predPos + Vector3.new(offsetX, offsetY, offsetZ)
 end
 
 --// BUSCA DE MURDER COM CACHE
@@ -815,8 +837,16 @@ local function ExecutarSilentAimRapido()
     local evento = arma:FindFirstChild("Shoot")
 
     if alvo and evento then
+        -- Segurança: não disparar se o murder já morreu
+        local humAlvo = alvo.Parent and alvo.Parent:FindFirstChild("Humanoid")
+        if humAlvo and humAlvo.Health <= 0 then return end
+
         local head = char:FindFirstChild("Head")
         if not head then return end
+
+        -- Segurança: não disparar se estiver além do alcance máximo
+        local dist = (alvo.Position - head.Position).Magnitude
+        if dist > sheriffConfig.MaxPredictionDistance then return end
         
         local posPredicao = CalcularPredicaoRapida(alvo, head.Position)
         
@@ -970,7 +1000,7 @@ local function CriarBotaoTela()
     -- Container principal
     local container = Instance.new("Frame")
     container.Size = UDim2.new(0, tamanhoBot, 0, tamanhoBot)
-    container.Position = UDim2.new(0.85, 0, 0.5, 0)
+    container.Position = savedBotaoPos
     container.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
     container.BackgroundTransparency = 0.3
     container.BorderSizePixel = 0
@@ -1059,6 +1089,7 @@ local function CriarBotaoTela()
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then
                     dragging = false
+                    savedBotaoPos = container.Position -- salvar posição ao soltar
                 end
             end)
         end
@@ -1097,12 +1128,12 @@ local function UpdateButtonSize(newSize)
 end
 
 local function UpdateFireRate(mode)
-    velocidadeTiro = modo
-    if modo == "Slow" then
+    velocidadeTiro = mode
+    if mode == "Slow" then
         delayTiro = 0.6
-    elseif modo == "Medium" then
+    elseif mode == "Medium" then
         delayTiro = 0.3
-    elseif modo == "Fast" then
+    elseif mode == "Fast" then
         delayTiro = 0.1
     else
         delayTiro = 0.3
@@ -1526,7 +1557,7 @@ do
     Tabs.Sheriff:AddSlider("HorizontalMultiplier", {
         Title = "Horizontal Multiplier",
         Description = "Adjust horizontal prediction strength",
-        Default = 0.79,
+        Default = 1.0,
         Min = 0.1,
         Max = 2.0,
         Rounding = 2,
@@ -1537,7 +1568,7 @@ do
     Tabs.Sheriff:AddSlider("VerticalMultiplier", {
         Title = "Vertical Multiplier",
         Description = "Adjust vertical prediction strength",
-        Default = 0.79,
+        Default = 1.0,
         Min = 0.1,
         Max = 2.0,
         Rounding = 2,
@@ -1548,8 +1579,8 @@ do
     Tabs.Sheriff:AddSlider("LeadTime", {
         Title = "Lead Time",
         Description = "Base prediction time",
-        Default = 0.12,
-        Min = 0.05,
+        Default = 0.05,
+        Min = 0.0,
         Max = 0.30,
         Rounding = 2,
         Callback = function(Value)
@@ -1559,8 +1590,8 @@ do
     Tabs.Sheriff:AddSlider("DistanceFactor", {
         Title = "Distance Factor",
         Description = "Distance-based prediction adjustment",
-        Default = 12.00,
-        Min = 1,
+        Default = 5.00,
+        Min = 0,
         Max = 30,
         Rounding = 2,
         Callback = function(Value)
@@ -1581,8 +1612,8 @@ do
     Tabs.Sheriff:AddSlider("VerticalDistanceScale", {
         Title = "Vertical Distance Scale",
         Description = "Vertical adjustment for distance",
-        Default = 10.50,
-        Min = 1,
+        Default = 2.00,
+        Min = 0,
         Max = 20,
         Rounding = 2,
         Callback = function(Value)
@@ -1603,7 +1634,7 @@ do
     Tabs.Sheriff:AddSlider("ZMultiplier", {
         Title = "Z Multiplier",
         Description = "Fine-tune Z axis",
-        Default = -0.01,
+        Default = 0.00,
         Min = -1.0,
         Max = 1.0,
         Rounding = 2,
